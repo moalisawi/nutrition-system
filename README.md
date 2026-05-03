@@ -55,9 +55,9 @@ This project is a web-based dashboard designed to manage a nutrition/subscriptio
 
 ### 🔐 Roles & Permissions
 
-* **Owner** (full control)
-* **Admin**
-* **Employee**
+* Owner (full control)
+* Admin
+* Employee
 
 ---
 
@@ -113,8 +113,6 @@ This project is a web-based dashboard designed to manage a nutrition/subscriptio
 ```bash
 git clone https://github.com/moalisawi/nutrition-system.git
 ```
-
----
 
 ### 2. Open the project
 
