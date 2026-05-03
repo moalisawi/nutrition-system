@@ -1,0 +1,63 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function activeUser() {
+      return signedIn()
+        && currentUserDoc().data.active == true;
+    }
+
+    function role() {
+      return currentUserDoc().data.role;
+    }
+
+    function isOwner() {
+      return activeUser() && role() == 'owner';
+    }
+
+    function isAdmin() {
+      return activeUser() && role() in ['owner', 'admin'];
+    }
+
+    function isEmployee() {
+      return activeUser() && role() == 'employee';
+    }
+
+    function employeeName() {
+      return currentUserDoc().data.employeeName;
+    }
+
+    match /subscribers/{subscriberId} {
+      allow read: if isAdmin()
+        || (isEmployee() && resource.data.convincedBy == employeeName());
+
+      allow create: if isAdmin()
+        || (isEmployee() && request.resource.data.convincedBy == employeeName());
+
+      allow update: if isAdmin();
+
+      allow delete: if isOwner();
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid || isOwner();
+      allow create, update, delete: if isOwner();
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isOwner();
+      allow create: if activeUser()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+  }
+}

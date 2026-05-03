@@ -1,0 +1,1661 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام تتبع المشتركين - أكاديمية التغذية</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-storage-compat.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { font-family: 'Cairo', sans-serif; }
+  body { background: #f8fafc; }
+  .sidebar { background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%); }
+  .card { transition: all .2s; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+  .modal-overlay { background: rgba(0,0,0,.5); position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: 1rem; }
+  .modal-overlay.active { display: flex; }
+  .status-active { background: #dcfce7; color: #166534; }
+  .status-expiring { background: #fef3c7; color: #92400e; }
+  .status-expired { background: #fee2e2; color: #991b1b; }
+  .status-withdrawn { background: #e2e8f0; color: #334155; }
+  .pkg-silver { background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%); color: #334155; border: 1px solid #94a3b8; }
+  .pkg-gold { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); color: #78350f; border: 1px solid #d97706; }
+  .badge-emp-hanan { background: #ede9fe; color: #5b21b6; }
+  .badge-emp-mayar { background: #ccfbf1; color: #115e59; }
+  .badge-emp-medo { background: #fed7aa; color: #9a3412; }
+  thead th { position: sticky; top: 0; background: #f8fafc; z-index: 10; }
+  .calendar-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 8px; font-size: 12px; transition: all 0.15s; cursor: default; position: relative; padding: 4px; }
+  .calendar-day.has-data { background: #eef2ff; border: 1px solid #c7d2fe; cursor: pointer; }
+  .calendar-day.has-data:hover { background: #c7d2fe; transform: scale(1.05); }
+  .calendar-day.empty { background: #f8fafc; border: 1px dashed #e2e8f0; color: #94a3b8; }
+  .calendar-day.today { box-shadow: 0 0 0 2px #6366f1; }
+  .calendar-day .day-num { font-weight: 600; font-size: 13px; }
+  .calendar-day .day-count { font-size: 10px; color: #4f46e5; font-weight: 700; }
+  .day-popup { position: absolute; bottom: 100%; right: 50%; transform: translateX(50%); background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; min-width: 180px; z-index: 30; box-shadow: 0 10px 25px rgba(0,0,0,0.1); display: none; font-size: 11px; text-align: right; }
+  .calendar-day:hover .day-popup { display: block; }
+  .pay-bar { height: 5px; border-radius: 3px; background: #e2e8f0; overflow: hidden; margin-top: 3px; min-width: 60px; }
+  .pay-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; background: #10b981; }
+  .pay-bar-fill.partial { background: #f59e0b; }
+  .file-drop-zone { border: 2px dashed #cbd5e1; border-radius: 8px; padding: 14px; text-align: center; cursor: pointer; transition: all .2s; }
+  .file-drop-zone:hover { border-color: #6366f1; background: #eef2ff; }
+</style>
+</head>
+<body class="min-h-screen">
+<div id="loginScreen" class="fixed inset-0 z-[100] bg-slate-950 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-slate-900">تسجيل الدخول</h1>
+      <p class="text-sm text-slate-500 mt-1">ادخل بحسابك للوصول إلى نظام التغذية</p>
+    </div>
+    <form id="loginForm" class="space-y-4">
+      <label class="block text-sm font-medium text-slate-700">البريد الإلكتروني<input id="loginEmail" type="email" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" dir="ltr"></label>
+      <label class="block text-sm font-medium text-slate-700">كلمة المرور<input id="loginPassword" type="password" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" dir="ltr"></label>
+      <div id="loginError" class="hidden rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm p-3"></div>
+      <button id="loginBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg text-sm font-bold">دخول</button>
+    </form>
+  </div>
+</div>
+
+<div id="appRoot" class="flex hidden">
+  <aside class="sidebar hidden lg:flex fixed right-0 top-0 z-30 w-64 min-h-screen text-white flex-col">
+    <div class="p-6 border-b border-slate-700">
+      <h1 class="text-xl font-bold">نظام التغذية</h1>
+      <p class="text-xs text-slate-400 mt-1">لوحة تحكم المشتركين</p>
+      <p id="sideUserRole" class="text-xs text-indigo-200 mt-3"></p>
+    </div>
+    <nav class="flex-1 p-4 space-y-1 text-sm">
+      <a href="#" class="block px-4 py-3 rounded-lg bg-indigo-500/20 border-r-4 border-indigo-400">الرئيسية</a>
+      <a href="#calendar" class="block px-4 py-3 rounded-lg hover:bg-slate-700">التقويم الشهري</a>
+      <a href="#advancedStats" class="block px-4 py-3 rounded-lg hover:bg-slate-700">إحصائيات متقدمة</a>
+      <a href="#subscribers" class="block px-4 py-3 rounded-lg hover:bg-slate-700">المشتركين</a>
+      <a href="/users.html" data-permission="canManageUsers" class="block px-4 py-3 rounded-lg hover:bg-slate-700">إدارة المستخدمين</a>
+      <a href="/logs.html" data-permission="canManageUsers" class="block px-4 py-3 rounded-lg hover:bg-slate-700">سجل العمليات</a>
+      <a href="#alerts" class="block px-4 py-3 rounded-lg hover:bg-slate-700">التنبيهات <span id="alertsBadge" class="mr-2 bg-red-500 text-white text-xs px-2 py-.5 rounded-full">0</span></a>
+    </nav>
+    <div class="p-4 border-t border-slate-700 space-y-2">
+      <button onclick="openAddModal()" class="w-full bg-emerald-600 hover:bg-emerald-700 py-2.5 rounded-lg text-sm font-bold">إضافة مشترك</button>
+      <button onclick="openExchangeRatesModal()" class="w-full bg-slate-700 hover:bg-slate-600 py-2 rounded-lg text-xs">أسعار الصرف</button>
+    </div>
+  </aside>
+
+  <main class="flex-1 lg:mr-64">
+    <header class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-20">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <div>
+      <h2 class="text-2xl font-bold text-slate-800">مرحباً ميدو</h2>
+          <p class="text-sm text-slate-500 mt-1"><span id="todayDate"></span> <span id="currentUserLabel"></span></p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="openAddModal()" data-permission="canCreate" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold">إضافة مشترك</button>
+          <button onclick="logout()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold">خروج</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="p-6 space-y-6">
+      <div id="firebaseNotice" class="hidden rounded-xl border p-4 text-sm"></div>
+
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card bg-white rounded-xl p-5 border border-slate-200">
+          <p class="text-sm text-slate-500 mb-1">إجمالي المشتركين</p>
+          <p id="totalSubs" class="text-3xl font-bold text-slate-800">0</p>
+          <p id="withdrawnCountText" class="text-xs text-slate-400 mt-1">منسحب: 0</p>
+        </div>
+        <div class="card bg-white rounded-xl p-5 border-2 border-emerald-300">
+          <p class="text-sm text-emerald-700 mb-1 font-medium">صافي الإيرادات</p>
+          <p class="text-3xl font-bold text-emerald-800">$<span id="netRevenueUSD">0</span></p>
+          <p id="grossRefundText" class="text-xs text-emerald-700 mt-1">مدفوعات: $0 / مسترد: $0</p>
+        </div>
+        <div class="card bg-white rounded-xl p-5 border border-slate-200">
+          <p class="text-sm text-slate-500 mb-1">ينتهي قريباً</p>
+          <p id="expiringCount" class="text-3xl font-bold text-slate-800">0</p>
+          <p class="text-xs text-slate-400 mt-1">خلال 7 أيام، بدون المنسحبين</p>
+        </div>
+        <div class="card bg-white rounded-xl p-5 border border-amber-200 ring-1 ring-amber-100">
+          <div class="bg-amber-100 w-10 h-10 rounded-lg flex items-center justify-center mb-3">
+            <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"/></svg>
+          </div>
+          <p class="text-sm text-amber-700 mb-1 font-medium">أقساط متبقية</p>
+          <p class="text-3xl font-bold text-amber-800">$<span id="totalRemainingUSD">0</span></p>
+          <p class="text-xs text-amber-600 mt-1">إجمالي غير محصّل</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="card pkg-silver rounded-xl p-5">
+          <p class="text-sm font-medium mb-1">الباقة الفضية</p>
+          <p id="silverCount" class="text-3xl font-bold">0</p>
+          <p class="text-xs mt-1 opacity-90">$<span id="silverRevenue">0</span> صافي</p>
+        </div>
+        <div class="card pkg-gold rounded-xl p-5">
+          <p class="text-sm font-medium mb-1">الباقة الذهبية</p>
+          <p id="goldCount" class="text-3xl font-bold">0</p>
+          <p class="text-xs mt-1 opacity-90">$<span id="goldRevenue">0</span> صافي</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl p-6 border border-slate-200" id="calendar">
+        <div class="flex items-center justify-between mb-5 flex-wrap gap-2">
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">📅 التقويم الشهري للاشتراكات</h3>
+            <p class="text-xs text-slate-500 mt-1">اضغط على أي يوم لعرض تفاصيله</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="changeMonth(-1)" class="px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50">&#8249;</button>
+            <span class="text-sm font-bold text-slate-800 px-4" id="currentMonthLabel"></span>
+            <button onclick="changeMonth(1)" class="px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50">&#8250;</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          <div class="bg-indigo-50 rounded-lg p-3">
+            <p class="text-xs text-indigo-700">إجمالي اشتراكات الشهر</p>
+            <p class="text-2xl font-bold text-indigo-900" id="monthTotal">0</p>
+          </div>
+          <div class="bg-emerald-50 rounded-lg p-3">
+            <p class="text-xs text-emerald-700">إيرادات الشهر</p>
+            <p class="text-2xl font-bold text-emerald-900">$<span id="monthRevenue">0</span></p>
+          </div>
+          <div class="pkg-silver rounded-lg p-3">
+            <p class="text-xs">فضية الشهر</p>
+            <p class="text-2xl font-bold" id="monthSilver">0</p>
+          </div>
+          <div class="pkg-gold rounded-lg p-3">
+            <p class="text-xs">ذهبية الشهر</p>
+            <p class="text-2xl font-bold" id="monthGold">0</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-7 gap-2 mb-2">
+          <div class="text-center text-xs font-bold text-slate-500 py-1">السبت</div>
+          <div class="text-center text-xs font-bold text-slate-500 py-1">الأحد</div>
+          <div class="text-center text-xs font-bold text-slate-500 py-1">الاثنين</div>
+          <div class="text-center text-xs font-bold text-slate-500 py-1">الثلاثاء</div>
+          <div class="text-center text-xs font-bold text-slate-500 py-1">الأربعاء</div>
+          <div class="text-center text-xs font-bold text-slate-500 py-1">الخميس</div>
+          <div class="text-center text-xs font-bold text-slate-500 py-1">الجمعة</div>
+        </div>
+        <div class="grid grid-cols-7 gap-2" id="calendarGrid"></div>
+        <div class="mt-4 flex items-center gap-4 text-xs text-slate-500 flex-wrap">
+          <div class="flex items-center gap-1"><div class="w-3 h-3 bg-indigo-100 border border-indigo-300 rounded"></div><span>يوم به اشتراكات</span></div>
+          <div class="flex items-center gap-1"><div class="w-3 h-3 bg-slate-50 border border-dashed border-slate-300 rounded"></div><span>يوم بدون اشتراكات</span></div>
+        </div>
+      </div>
+
+      <!-- Advanced Stats -->
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden" id="advancedStats">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">📊 إحصائيات متقدمة</h3>
+            <p class="text-xs text-slate-500 mt-1">فلتر مخصص للمقاييس والتحليلات</p>
+          </div>
+        </div>
+        <div class="p-6 space-y-5">
+          <!-- Filters -->
+          <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <select id="asFilterPackage" onchange="renderAdvancedStats()" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
+              <option value="">كل الباقات</option>
+              <option value="فضية">فضية</option>
+              <option value="ذهبية">ذهبية</option>
+            </select>
+            <select id="asFilterCountry" onchange="renderAdvancedStats()" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
+              <option value="">كل الدول</option>
+            </select>
+            <select id="asFilterMonth" onchange="renderAdvancedStats()" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
+              <option value="">كل الأشهر</option>
+            </select>
+            <select id="asFilterEmployee" onchange="renderAdvancedStats()" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
+              <option value="">كل الموظفين</option>
+              <option>حنان</option><option>ميار</option><option>ميدو</option>
+            </select>
+            <select id="asFilterPayment" onchange="renderAdvancedStats()" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm">
+              <option value="">كل طرق الدفع</option>
+            </select>
+          </div>
+          <!-- Metric Cards -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="bg-indigo-50 rounded-lg p-3 text-center">
+              <p class="text-xs text-indigo-600">مشتركون</p>
+              <p class="text-2xl font-bold text-indigo-900" id="asTotalSubs">0</p>
+            </div>
+            <div class="bg-emerald-50 rounded-lg p-3 text-center">
+              <p class="text-xs text-emerald-600">صافي الإيراد</p>
+              <p class="text-lg font-bold text-emerald-800" id="asTotalRev">—</p>
+            </div>
+            <div class="bg-sky-50 rounded-lg p-3 text-center">
+              <p class="text-xs text-sky-600">إجمالي محصّل</p>
+              <p class="text-lg font-bold text-sky-800" id="asTotalPaid">—</p>
+            </div>
+            <div class="bg-amber-50 rounded-lg p-3 text-center">
+              <p class="text-xs text-amber-600">متبقي أقساط</p>
+              <p class="text-lg font-bold text-amber-800" id="asTotalRem">—</p>
+            </div>
+          </div>
+          <!-- Breakdowns -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <h4 class="text-sm font-semibold text-slate-700 mb-3">حسب الموظف</h4>
+              <div id="asEmpBreakdown"></div>
+            </div>
+            <div>
+              <h4 class="text-sm font-semibold text-slate-700 mb-3">حسب طريقة الدفع</h4>
+              <div id="asPayBreakdown"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl p-6 border border-slate-200">
+        <h3 class="text-lg font-bold text-slate-800 mb-1">أداء فريق المبيعات</h3>
+        <p class="text-xs text-slate-500 mb-5">محسوب على صافي الإيراد بعد الاسترداد</p>
+        <div id="teamPerformance" class="space-y-4"></div>
+      </div>
+
+      <div id="alerts" class="bg-white rounded-xl border border-amber-200 overflow-hidden">
+        <div class="bg-gradient-to-l from-amber-50 to-white px-6 py-4 border-b border-amber-100">
+          <h3 class="text-lg font-bold text-amber-900">تنبيهات الاشتراكات القريبة من الانتهاء</h3>
+        </div>
+        <div id="alertsList" class="divide-y divide-slate-100"></div>
+      </div>
+
+      <div id="subscribers" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">سجل المشتركين</h3>
+            <p id="subsCount" class="text-xs text-slate-500 mt-1"></p>
+          </div>
+          <div class="flex gap-2 flex-wrap">
+            <input id="searchInput" type="text" placeholder="بحث..." class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-48">
+            <select id="filterEmployee" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"><option value="">كل الموظفين</option><option>حنان</option><option>ميار</option><option>ميدو</option></select>
+            <select id="filterPackage" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"><option value="">كل الباقات</option><option value="فضية">فضية</option><option value="ذهبية">ذهبية</option></select>
+            <select id="filterStatus" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"><option value="">كل الحالات</option><option>نشط</option><option>ينتهي قريباً</option><option>منتهي</option><option>منسحب</option></select>
+          </div>
+        </div>
+        <div class="overflow-x-auto" style="max-height: 560px;">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-slate-50 text-slate-600 text-xs">
+                <th class="text-right px-4 py-3">#</th>
+                <th class="text-right px-4 py-3">التاريخ</th>
+                <th class="text-right px-4 py-3">الاسم</th>
+                <th class="text-right px-4 py-3">الجوال</th>
+                <th class="text-right px-4 py-3">الإقامة</th>
+                <th class="text-right px-4 py-3">الباقة</th>
+                <th class="text-right px-4 py-3">الكلي</th>
+                <th class="text-right px-4 py-3 bg-emerald-50 text-emerald-700">محصّل / متبقي</th>
+                <th class="text-right px-4 py-3">المسترد</th>
+                <th class="text-right px-4 py-3 bg-emerald-50 text-emerald-700">الصافي</th>
+                <th class="text-right px-4 py-3">الانتهاء</th>
+                <th class="text-right px-4 py-3">الحالة</th>
+                <th class="text-right px-4 py-3">المُقنع</th>
+                <th class="text-right px-4 py-3">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="subsTableBody" class="divide-y divide-slate-100"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="subscriberModal" class="modal-overlay">
+  <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
+      <div>
+        <h3 id="subscriberModalTitle" class="text-xl font-bold text-slate-800">إضافة مشترك جديد</h3>
+        <p class="text-xs text-slate-500 mt-1">افصل بين دولة الإقامة ومفتاح الهاتف لتجنب أخطاء الأرقام</p>
+      </div>
+      <button onclick="closeSubscriberModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+    </div>
+    <form id="subscriberForm" class="p-6 space-y-4">
+      <input type="hidden" id="editingId">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="block text-sm font-medium text-slate-700">تاريخ الاشتراك <span class="text-red-500">*</span><input id="f_date" type="date" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+        <label class="block text-sm font-medium text-slate-700">اسم المشترك <span class="text-red-500">*</span><input id="f_name" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+      </div>
+      <label class="block text-sm font-medium text-slate-700">دولة / منطقة الإقامة <span class="text-red-500">*</span><select id="f_residence" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></select></label>
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1">رقم الجوال <span class="text-red-500">*</span></label>
+        <div class="grid grid-cols-1 md:grid-cols-[1fr_140px] gap-2">
+          <select id="f_phoneCountry" required onchange="updateDialCode()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm"></select>
+          <div id="f_dialcode_display" class="flex items-center justify-center bg-slate-100 border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono font-bold text-slate-700">+</div>
+        </div>
+        <input id="f_phone" type="tel" required placeholder="رقم الجوال بدون مفتاح الدولة" class="mt-2 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" dir="ltr">
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="block text-sm font-medium text-slate-700">العمر<input id="f_age" type="number" min="10" max="100" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+        <div>
+          <p class="block text-sm font-medium text-slate-700 mb-1">نوع الباقة <span class="text-red-500">*</span></p>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="cursor-pointer"><input type="radio" name="package" value="فضية" required class="peer sr-only"><div class="pkg-silver border-2 border-transparent peer-checked:border-slate-700 rounded-lg p-3 text-center font-bold">فضية</div></label>
+            <label class="cursor-pointer"><input type="radio" name="package" value="ذهبية" class="peer sr-only"><div class="pkg-gold border-2 border-transparent peer-checked:border-amber-700 rounded-lg p-3 text-center font-bold">ذهبية</div></label>
+          </div>
+        </div>
+      </div>
+      <label class="block text-sm font-medium text-slate-700">مدة الاشتراك <span class="text-red-500">*</span><select id="f_duration" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="">اختر المدة...</option><option value="30">شهر</option><option value="60">شهرين</option><option value="90">3 أشهر</option><option value="180">6 أشهر</option><option value="365">سنة</option></select></label>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="block text-sm font-medium text-slate-700">السعر الكلي للاشتراك <span class="text-red-500">*</span><input id="f_totalPrice" type="number" required step="0.01" min="0" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+        <label class="block text-sm font-medium text-slate-700">عملة الدفع <span class="text-red-500">*</span><select id="f_currency" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="USD">USD دولار</option><option value="EGP">EGP جنيه</option><option value="JOD">JOD دينار</option><option value="ILS">ILS شيكل</option></select></label>
+      </div>
+      <!-- Initial payment — shown only when creating -->
+      <div id="initialPaymentSection">
+        <label class="block text-sm font-medium text-slate-700">المبلغ المدفوع الآن
+          <input id="f_initialPayment" type="number" step="0.01" min="0" placeholder="افتراضي: السعر الكلي (دفع كامل)" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+        </label>
+        <p class="text-xs text-slate-400 mt-1">اتركه فارغاً للدفع الكامل، أو أدخل صفراً لتسجيل قسط لاحقاً.</p>
+      </div>
+      <!-- Receipt upload — shown only when creating -->
+      <div id="receiptUploadSection">
+        <label class="block text-sm font-medium text-slate-700 mb-1">وصل الدفع الأولي (اختياري)</label>
+        <div class="file-drop-zone" onclick="document.getElementById('f_receipt').click()">
+          <p class="text-sm text-slate-400">اضغط لرفع صورة أو PDF</p>
+          <p class="text-xs text-slate-300 mt-1">JPG · PNG · PDF</p>
+        </div>
+        <input type="file" id="f_receipt" accept="image/*,.pdf" class="hidden" onchange="previewReceiptFile(this, document.getElementById('f_receiptPreview'))">
+        <div id="f_receiptPreview" class="mt-2"></div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="block text-sm font-medium text-slate-700">طريقة الدفع <span class="text-red-500">*</span><select id="f_payment" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="">اختر...</option><option>PayPal</option><option>محفظة موبايل</option><option>زين كاش</option><option>انستاباي</option><option>ويسترن يونيون</option><option>كريبتو / USDT</option><option>فودافون كاش</option><option>كاش</option></select></label>
+        <label class="block text-sm font-medium text-slate-700">المصدر <span class="text-red-500">*</span><select id="f_source" required onchange="toggleReferrerField()" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="">اختر...</option><option>إعلان فيسبوك</option><option>إعلان انستجرام</option><option>إعلان تيك توك</option><option>إعلان يوتيوب</option><option>انستجرام عضوي</option><option>تيك توك عضوي</option><option>ترشيح</option><option>بحث جوجل</option><option>أخرى</option></select></label>
+      </div>
+      <label id="referrerWrap" class="hidden text-sm font-medium text-slate-700">اسم المُرشِّح<input id="f_referrer" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="block text-sm font-medium text-slate-700">مين أقنعه <span class="text-red-500">*</span><select id="f_convinced" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="">اختر...</option><option>حنان</option><option>ميار</option><option>ميدو</option></select></label>
+        <label class="block text-sm font-medium text-slate-700">شيفت الدفع <span class="text-red-500">*</span><select id="f_paidshift" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="">اختر...</option><option>حنان</option><option>ميار</option><option>ميدو</option></select></label>
+      </div>
+      <div>
+        <p class="block text-sm font-medium text-slate-700 mb-1">الفريق المستلِم <span class="text-red-500">*</span></p>
+        <div class="grid grid-cols-3 gap-2">
+          <label class="cursor-pointer"><input type="radio" name="team" value="فريق الشباب" required class="peer sr-only"><div class="bg-blue-50 border-2 border-transparent peer-checked:border-blue-600 rounded-lg p-3 text-center text-sm font-medium text-blue-800">فريق الشباب</div></label>
+          <label class="cursor-pointer"><input type="radio" name="team" value="فريق البنات" class="peer sr-only"><div class="bg-pink-50 border-2 border-transparent peer-checked:border-pink-600 rounded-lg p-3 text-center text-sm font-medium text-pink-800">فريق البنات</div></label>
+          <label class="cursor-pointer"><input type="radio" name="team" value="عبدالله طلبة" class="peer sr-only"><div class="bg-emerald-50 border-2 border-transparent peer-checked:border-emerald-600 rounded-lg p-3 text-center text-sm font-medium text-emerald-800">عبدالله طلبة</div></label>
+        </div>
+      </div>
+      <label class="block text-sm font-medium text-slate-700">ملاحظات<textarea id="f_notes" rows="2" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm resize-none"></textarea></label>
+      <div id="editStateInfo" class="hidden bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600"></div>
+      <div class="flex gap-3 pt-4 border-t border-slate-200">
+        <button id="saveSubscriberBtn" type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-lg text-sm font-bold">حفظ المشترك</button>
+        <button type="button" onclick="closeSubscriberModal()" class="px-6 py-3 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">إلغاء</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="withdrawModal" class="modal-overlay">
+  <div class="bg-white rounded-2xl max-w-lg w-full p-6">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-xl font-bold text-slate-800">تسجيل انسحاب</h3>
+        <p id="withdrawSubName" class="text-xs text-slate-500 mt-1"></p>
+      </div>
+      <button onclick="closeWithdrawModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+    </div>
+    <form id="withdrawForm" class="space-y-4">
+      <input type="hidden" id="withdrawId">
+      <label class="block text-sm font-medium text-slate-700">تاريخ الانسحاب <span class="text-red-500">*</span><input id="w_date" type="date" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+      <label class="block text-sm font-medium text-slate-700">سبب الانسحاب<textarea id="w_reason" rows="2" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm resize-none"></textarea></label>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="block text-sm font-medium text-slate-700">مبلغ الاسترداد<input id="w_refundAmount" type="number" step="0.01" min="0" value="0" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+        <label class="block text-sm font-medium text-slate-700">عملة الاسترداد<select id="w_refundCurrency" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="USD">USD دولار</option><option value="EGP">EGP جنيه</option><option value="JOD">JOD دينار</option><option value="ILS">ILS شيكل</option></select></label>
+      </div>
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">سيتم حفظ سعر الصرف وقت تسجيل الاسترداد حتى لا تتغير الحسابات لاحقاً.</div>
+      <div class="flex gap-2 pt-2">
+        <button id="saveWithdrawBtn" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white py-2.5 rounded-lg text-sm font-bold">حفظ الانسحاب</button>
+        <button type="button" onclick="closeWithdrawModal()" class="px-4 py-2.5 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">إلغاء</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Add Payment -->
+<div id="addPaymentModal" class="modal-overlay">
+  <div class="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
+      <div>
+        <h3 class="text-xl font-bold text-slate-800">إضافة دفعة جديدة</h3>
+        <p class="text-xs text-slate-500 mt-1" id="ap_subInfo"></p>
+      </div>
+      <button onclick="closeAddPaymentModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+    </div>
+    <!-- Payment summary bar -->
+    <div class="px-6 pt-4 pb-2" id="ap_summaryBar"></div>
+    <form id="addPaymentForm" class="px-6 pb-6 space-y-4">
+      <input type="hidden" id="ap_subscriberId">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="block text-sm font-medium text-slate-700">تاريخ الدفعة <span class="text-red-500">*</span><input id="ap_date" type="date" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+        <label class="block text-sm font-medium text-slate-700">المبلغ <span class="text-red-500">*</span><input id="ap_amount" type="number" required step="0.01" min="0.01" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="block text-sm font-medium text-slate-700">العملة <span class="text-red-500">*</span><select id="ap_currency" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="USD">USD دولار</option><option value="EGP">EGP جنيه</option><option value="JOD">JOD دينار</option><option value="ILS">ILS شيكل</option></select></label>
+        <label class="block text-sm font-medium text-slate-700">طريقة الدفع <span class="text-red-500">*</span><select id="ap_paymentMethod" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="">اختر...</option><option>PayPal</option><option>محفظة موبايل</option><option>زين كاش</option><option>انستاباي</option><option>ويسترن يونيون</option><option>كريبتو / USDT</option><option>فودافون كاش</option><option>كاش</option></select></label>
+      </div>
+      <label class="block text-sm font-medium text-slate-700">ملاحظات<textarea id="ap_notes" rows="2" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm resize-none"></textarea></label>
+      <!-- Receipt Upload -->
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1">وصل الدفع (اختياري)</label>
+        <div class="file-drop-zone" onclick="document.getElementById('ap_receipt').click()">
+          <p class="text-sm text-slate-400">اضغط لرفع صورة أو PDF</p>
+          <p class="text-xs text-slate-300 mt-1">JPG · PNG · PDF</p>
+        </div>
+        <input type="file" id="ap_receipt" accept="image/*,.pdf" class="hidden" onchange="previewReceiptFile(this, document.getElementById('ap_receiptPreview'))">
+        <div id="ap_receiptPreview" class="mt-2"></div>
+      </div>
+      <div class="flex gap-3 pt-2 border-t border-slate-200">
+        <button id="ap_submitBtn" type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-lg text-sm font-bold">حفظ الدفعة</button>
+        <button type="button" onclick="closeAddPaymentModal()" class="px-6 py-3 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">إلغاء</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: View Payments -->
+<div id="viewPaymentsModal" class="modal-overlay">
+  <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
+      <div>
+        <h3 class="text-xl font-bold text-slate-800" id="vp_title">سجل الدفعات</h3>
+        <p class="text-xs text-slate-500 mt-1" id="vp_subtitle"></p>
+      </div>
+      <button onclick="closeViewPaymentsModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+    </div>
+    <div class="p-6" id="vp_body"><div class="text-center text-slate-400 py-8">جاري التحميل...</div></div>
+  </div>
+</div>
+
+<div id="dayModal" class="modal-overlay">
+  <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+      <div>
+        <h3 class="text-xl font-bold text-slate-800" id="dayModalTitle">تفاصيل اليوم</h3>
+        <p class="text-xs text-slate-500 mt-1" id="dayModalSubtitle"></p>
+      </div>
+      <button onclick="closeDayModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+    </div>
+    <div class="p-6" id="dayModalBody"></div>
+  </div>
+</div>
+
+<div id="exchangeRatesModal" class="modal-overlay">
+  <div class="bg-white rounded-2xl max-w-lg w-full p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-xl font-bold text-slate-800">إعدادات أسعار الصرف</h3>
+      <button onclick="closeExchangeRatesModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+    </div>
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-800">السعر مقابل الدولار. التعديل يؤثر على العمليات الجديدة فقط.</div>
+    <div id="ratesEditor" class="space-y-3"></div>
+    <div class="flex gap-2 mt-6">
+      <button onclick="saveExchangeRates()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-medium">حفظ</button>
+      <button onclick="closeExchangeRatesModal()" class="px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDgLSqpUGXIuG9nTVknm1sPr0ngkThSaUA",
+  authDomain: "joker-52b38.firebaseapp.com",
+  projectId: "joker-52b38",
+  storageBucket: "joker-52b38.firebasestorage.app",
+  messagingSenderId: "182749321026",
+  appId: "1:182749321026:web:1e835fdf6fa52210e79adb",
+  measurementId: "G-C546FDS9NM"
+};
+
+let db = null;
+let auth = null;
+let unsubscribeSubscribers = null;
+let unsubscribeUsers = null;
+let sampleData = [];
+let usersData = [];
+let currentUserProfile = null;
+let currentExchangeRates = { USD: 1, EGP: 47.5, JOD: 0.71, ILS: 3.65 };
+let currentMonth = new Date();
+currentMonth.setDate(1);
+
+const PAYMENT_METHODS = ['PayPal','محفظة موبايل','زين كاش','انستاباي','ويسترن يونيون','كريبتو / USDT','فودافون كاش','كاش'];
+
+const roleLabels = { owner: 'مالك', admin: 'مدير', employee: 'موظف' };
+const permissionsByRole = {
+  owner: { canViewAll: true, canViewRevenue: true, canCreate: true, canEdit: true, canWithdraw: true, canDelete: true, canManageUsers: true },
+  admin: { canViewAll: true, canViewRevenue: true, canCreate: true, canEdit: true, canWithdraw: true, canDelete: false, canManageUsers: false },
+  employee: { canViewAll: false, canViewRevenue: false, canCreate: true, canEdit: false, canWithdraw: false, canDelete: false, canManageUsers: false },
+};
+
+function hasPermission(name) {
+  const role = currentUserProfile?.role;
+  return Boolean(role && permissionsByRole[role]?.[name]);
+}
+
+const currencyInfo = {
+  USD: { name: 'دولار', code: 'USD' },
+  EGP: { name: 'جنيه', code: 'EGP' },
+  JOD: { name: 'دينار', code: 'JOD' },
+  ILS: { name: 'شيكل', code: 'ILS' },
+};
+
+const residenceCountries = [
+  { name: 'قطاع غزة', value: 'فلسطين-غزة' },
+  { name: 'الضفة الغربية', value: 'فلسطين-الضفة' },
+  { name: 'عرب الداخل', value: 'فلسطين-الداخل' },
+];
+
+const phoneCountries = [
+  ['أفغانستان','AF','+93'],['ألبانيا','AL','+355'],['الجزائر','DZ','+213'],['أندورا','AD','+376'],['أنغولا','AO','+244'],['الأرجنتين','AR','+54'],['أرمينيا','AM','+374'],['أستراليا','AU','+61'],['النمسا','AT','+43'],['أذربيجان','AZ','+994'],
+  ['البحرين','BH','+973'],['بنغلاديش','BD','+880'],['بيلاروسيا','BY','+375'],['بلجيكا','BE','+32'],['بليز','BZ','+501'],['بنين','BJ','+229'],['بوتان','BT','+975'],['بوليفيا','BO','+591'],['البوسنة والهرسك','BA','+387'],['بوتسوانا','BW','+267'],['البرازيل','BR','+55'],['بروناي','BN','+673'],['بلغاريا','BG','+359'],['بوركينا فاسو','BF','+226'],['بوروندي','BI','+257'],
+  ['كمبوديا','KH','+855'],['الكاميرون','CM','+237'],['كندا','CA','+1'],['تشاد','TD','+235'],['تشيلي','CL','+56'],['الصين','CN','+86'],['كولومبيا','CO','+57'],['الكونغو','CG','+242'],['كوستاريكا','CR','+506'],['كرواتيا','HR','+385'],['كوبا','CU','+53'],['قبرص','CY','+357'],['التشيك','CZ','+420'],
+  ['الدنمارك','DK','+45'],['جيبوتي','DJ','+253'],['الإكوادور','EC','+593'],['مصر','EG','+20'],['السلفادور','SV','+503'],['إريتريا','ER','+291'],['إستونيا','EE','+372'],['إثيوبيا','ET','+251'],['فنلندا','FI','+358'],['فرنسا','FR','+33'],
+  ['الغابون','GA','+241'],['غامبيا','GM','+220'],['جورجيا','GE','+995'],['ألمانيا','DE','+49'],['غانا','GH','+233'],['اليونان','GR','+30'],['غواتيمالا','GT','+502'],['غينيا','GN','+224'],['هايتي','HT','+509'],['هندوراس','HN','+504'],['هونغ كونغ','HK','+852'],['المجر','HU','+36'],
+  ['آيسلندا','IS','+354'],['الهند','IN','+91'],['إندونيسيا','ID','+62'],['إيران','IR','+98'],['العراق','IQ','+964'],['أيرلندا','IE','+353'],['الداخل / إسرائيل','IL','+972'],['إيطاليا','IT','+39'],['ساحل العاج','CI','+225'],['اليابان','JP','+81'],['الأردن','JO','+962'],
+  ['كازاخستان','KZ','+7'],['كينيا','KE','+254'],['الكويت','KW','+965'],['قرغيزستان','KG','+996'],['لاوس','LA','+856'],['لاتفيا','LV','+371'],['لبنان','LB','+961'],['ليبيا','LY','+218'],['ليختنشتاين','LI','+423'],['ليتوانيا','LT','+370'],['لوكسمبورغ','LU','+352'],
+  ['ماليزيا','MY','+60'],['جزر المالديف','MV','+960'],['مالي','ML','+223'],['مالطا','MT','+356'],['موريتانيا','MR','+222'],['موريشيوس','MU','+230'],['المكسيك','MX','+52'],['مولدوفا','MD','+373'],['موناكو','MC','+377'],['منغوليا','MN','+976'],['المغرب','MA','+212'],['موزمبيق','MZ','+258'],
+  ['نيبال','NP','+977'],['هولندا','NL','+31'],['نيوزيلندا','NZ','+64'],['نيكاراغوا','NI','+505'],['النيجر','NE','+227'],['نيجيريا','NG','+234'],['كوريا الشمالية','KP','+850'],['النرويج','NO','+47'],['عمان','OM','+968'],['باكستان','PK','+92'],['فلسطين','PS','+970'],['بنما','PA','+507'],['باراغواي','PY','+595'],['بيرو','PE','+51'],['الفلبين','PH','+63'],['بولندا','PL','+48'],['البرتغال','PT','+351'],
+  ['قطر','QA','+974'],['رومانيا','RO','+40'],['روسيا','RU','+7'],['رواندا','RW','+250'],['السعودية','SA','+966'],['السنغال','SN','+221'],['صربيا','RS','+381'],['سنغافورة','SG','+65'],['سلوفاكيا','SK','+421'],['سلوفينيا','SI','+386'],['الصومال','SO','+252'],['جنوب أفريقيا','ZA','+27'],['كوريا الجنوبية','KR','+82'],['إسبانيا','ES','+34'],['سريلانكا','LK','+94'],['السودان','SD','+249'],['السويد','SE','+46'],['سويسرا','CH','+41'],['سوريا','SY','+963'],
+  ['تايوان','TW','+886'],['طاجيكستان','TJ','+992'],['تنزانيا','TZ','+255'],['تايلاند','TH','+66'],['توغو','TG','+228'],['تونس','TN','+216'],['تركيا','TR','+90'],['تركمانستان','TM','+993'],['أوغندا','UG','+256'],['أوكرانيا','UA','+380'],['الإمارات','AE','+971'],['المملكة المتحدة','GB','+44'],['الولايات المتحدة','US','+1'],['أوروغواي','UY','+598'],['أوزبكستان','UZ','+998'],['فنزويلا','VE','+58'],['فيتنام','VN','+84'],['اليمن','YE','+967'],['زامبيا','ZM','+260'],['زيمبابوي','ZW','+263']
+].map(([name, iso, dialCode]) => ({ name, iso, dialCode }));
+
+function showNotice(message, type = 'warn') {
+  const box = document.getElementById('firebaseNotice');
+  box.className = `rounded-xl border p-4 text-sm ${type === 'error' ? 'border-red-200 bg-red-50 text-red-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`;
+  box.textContent = message;
+  box.classList.remove('hidden');
+}
+
+function initFirebase() {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    auth = firebase.auth();
+    storage = firebase.storage();
+    auth.onAuthStateChanged(handleAuthState);
+  } catch (error) {
+    showNotice('تعذر تشغيل Firebase: ' + error.message, 'error');
+  }
+}
+
+async function handleAuthState(user) {
+  unsubscribeSubscribers?.();
+  unsubscribeUsers?.();
+  sampleData = [];
+  usersData = [];
+  renderAll();
+  renderUsersAdmin();
+
+  if (!user) {
+    currentUserProfile = null;
+    document.getElementById('appRoot').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const doc = await db.collection('users').doc(user.uid).get();
+    if (!doc.exists || doc.data().active !== true) {
+      await auth.signOut();
+      showLoginError('حسابك غير مفعّل في النظام. اطلب من المالك إضافتك في users.');
+      return;
+    }
+    currentUserProfile = { uid: user.uid, email: user.email, ...doc.data() };
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('appRoot').classList.remove('hidden');
+    applyRoleUi();
+    subscribeToSubscribers();
+  } catch (error) {
+    showLoginError('تعذر تحميل صلاحيات المستخدم: ' + error.message);
+    await auth.signOut();
+  }
+}
+
+function subscribeToSubscribers() {
+  unsubscribeSubscribers?.();
+  const baseQuery = hasPermission('canViewAll')
+    ? db.collection('subscribers').orderBy('createdAt', 'desc')
+    : db.collection('subscribers').where('convincedBy', '==', currentUserProfile.employeeName || currentUserProfile.name || '');
+
+  unsubscribeSubscribers = baseQuery.onSnapshot(snapshot => {
+    sampleData = snapshot.docs.map(doc => normalizeSubscriber({ id: doc.id, ...doc.data() }));
+    sampleData.sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
+    renderAll();
+  }, error => showNotice('تعذر تحميل بيانات المشتركين من Firebase: ' + error.message, 'error'));
+}
+
+function subscribeToUsers(force = false) {
+  if (!hasPermission('canManageUsers')) return;
+  if (unsubscribeUsers && !force) return;
+  unsubscribeUsers?.();
+  unsubscribeUsers = db.collection('users').onSnapshot(snapshot => {
+    usersData = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }))
+      .sort((a, b) => String(a.name || a.email || '').localeCompare(String(b.name || b.email || ''), 'ar'));
+    renderUsersAdmin();
+  }, error => showNotice('تعذر تحميل المستخدمين: ' + error.message, 'error'));
+}
+
+function calculateExpiry(startDate, days) {
+  const start = new Date(startDate);
+  start.setDate(start.getDate() + Number(days || 0));
+  return start.toISOString().split('T')[0];
+}
+function getDaysRemaining(expiryDate) {
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  return Math.ceil((new Date(expiryDate) - today) / (1000 * 60 * 60 * 24));
+}
+function getComputedStatus(s) {
+  if (s.subscriptionState === 'withdrawn') return 'منسحب';
+  if (s.daysRemaining < 0) return 'منتهي';
+  if (s.daysRemaining <= 7) return 'ينتهي قريباً';
+  return 'نشط';
+}
+function normalizeSubscriber(s) {
+  const expiryDate = s.expiryDate || calculateExpiry(s.date, s.duration);
+  const daysRemaining = getDaysRemaining(expiryDate);
+  const lockedRate = Number(s.lockedRate || 1);
+  // Legacy amount fields (kept for backward compat)
+  const amount = Number(s.amount || 0);
+  const amountUSD = Number(s.amountUSD || (amount / lockedRate));
+  // New installment fields — fallback chain is:
+  //   new doc  → totalPrice / paidAmount / remainingAmount stored explicitly
+  //   old doc  → amount / amountUSD (treated as fully paid, remaining = 0)
+  const totalPrice    = Number(s.totalPrice    ?? amount);
+  const totalPriceUSD = Number(s.totalPriceUSD ?? amountUSD);
+
+  // paidAmountUSD is the source of truth for "how much was actually collected"
+  const paidAmountUSD = Number(
+    s.paidAmountUSD !== undefined ? s.paidAmountUSD   // new doc: explicit
+    : amountUSD                                        // old doc: fully paid
+  );
+  const paidAmount = Number(
+    s.paidAmount !== undefined ? s.paidAmount
+    : paidAmountUSD * lockedRate
+  );
+  const remainingAmountUSD = Number(
+    s.remainingAmountUSD !== undefined ? s.remainingAmountUSD
+    : Math.max(0, totalPriceUSD - paidAmountUSD)
+  );
+  // Refund
+  const refundAmount = Number(s.refundAmount || 0);
+  const refundRate = Number(s.refundRate || 1);
+  const refundAmountUSD = Number(s.refundAmountUSD || (refundAmount / refundRate));
+  const netAmountUSD = Math.max(0, Number(s.netAmountUSD ?? (paidAmountUSD - refundAmountUSD)));
+  const normalized = {
+    ...s, lockedRate, amount, amountUSD,
+    totalPrice, totalPriceUSD, paidAmount, paidAmountUSD, remainingAmountUSD,
+    refundAmount, refundRate, refundAmountUSD, netAmountUSD, expiryDate, daysRemaining
+  };
+  normalized.status = getComputedStatus(normalized);
+  return normalized;
+}
+function formatNumber(num, decimals = 0) {
+  return new Intl.NumberFormat('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(Number(num || 0));
+}
+function formatDate(dateStr) {
+  if (!dateStr) return '-';
+  return new Date(dateStr).toLocaleDateString('ar-EG', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+function getMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  return new Date(value).getTime() || 0;
+}
+function getResidenceLabel(value) {
+  return residenceCountries.find(c => c.value === value)?.name || phoneCountries.find(c => c.iso === value)?.name || value || '-';
+}
+function getPhoneCountryLabel(iso) {
+  const c = phoneCountries.find(x => x.iso === iso);
+  return c ? `${c.name} ${c.dialCode}` : '';
+}
+
+const arabicMonths = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+
+function renderCalendar() {
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  document.getElementById('currentMonthLabel').textContent = `${arabicMonths[month]} ${year}`;
+  const monthData = sampleData.filter(s => {
+    const d = new Date(s.date);
+    return d.getFullYear() === year && d.getMonth() === month;
+  });
+  document.getElementById('monthTotal').textContent = formatNumber(monthData.length);
+  document.getElementById('monthRevenue').textContent = hasPermission('canViewRevenue')
+    ? formatNumber(monthData.reduce((s, x) => s + x.netAmountUSD, 0), 2) : 'مخفي';
+  document.getElementById('monthSilver').textContent = formatNumber(monthData.filter(s => s.package === 'فضية').length);
+  document.getElementById('monthGold').textContent = formatNumber(monthData.filter(s => s.package === 'ذهبية').length);
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const daysInMonth = lastDay.getDate();
+  const startOffset = (firstDay.getDay() + 1) % 7;
+  const todayStr = new Date().toISOString().split('T')[0];
+  let html = '';
+  for (let i = 0; i < startOffset; i++) html += '<div></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const dayData = monthData.filter(s => s.date === dateStr);
+    const isToday = dateStr === todayStr;
+    const silverCount = dayData.filter(s => s.package === 'فضية').length;
+    const goldCount = dayData.filter(s => s.package === 'ذهبية').length;
+    const dayRevenue = dayData.reduce((s, x) => s + x.netAmountUSD, 0);
+    if (dayData.length > 0) {
+      const revenuePopup = hasPermission('canViewRevenue') ? `<p class="text-emerald-600 font-bold">$${formatNumber(dayRevenue, 2)}</p>` : '';
+      html += `<div class="calendar-day has-data${isToday ? ' today' : ''}" onclick="showDayDetails('${dateStr}')">
+        <div class="day-num">${day}</div>
+        <div class="day-count">${dayData.length} اشتراك</div>
+        <div class="flex gap-1 mt-1">
+          ${silverCount > 0 ? `<span style="font-size:9px;background:#cbd5e1;color:#334155;padding:1px 4px;border-radius:4px;">${silverCount}</span>` : ''}
+          ${goldCount > 0 ? `<span style="font-size:9px;background:#fde68a;color:#78350f;padding:1px 4px;border-radius:4px;">${goldCount}</span>` : ''}
+        </div>
+        <div class="day-popup">
+          <p class="font-bold text-slate-800 mb-1">يوم ${day}</p>
+          <p class="text-slate-600">${dayData.length} اشتراك</p>
+          ${revenuePopup}
+          ${silverCount > 0 ? `<p class="text-slate-600">فضية: ${silverCount}</p>` : ''}
+          ${goldCount > 0 ? `<p class="text-amber-700">ذهبية: ${goldCount}</p>` : ''}
+        </div>
+      </div>`;
+    } else {
+      html += `<div class="calendar-day empty${isToday ? ' today' : ''}"><div class="day-num">${day}</div></div>`;
+    }
+  }
+  document.getElementById('calendarGrid').innerHTML = html;
+}
+
+function changeMonth(delta) {
+  currentMonth.setMonth(currentMonth.getMonth() + delta);
+  renderCalendar();
+}
+
+function showDayDetails(dateStr) {
+  const dayData = sampleData.filter(s => s.date === dateStr);
+  const date = new Date(dateStr);
+  document.getElementById('dayModalTitle').textContent = date.toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  document.getElementById('dayModalSubtitle').textContent = `${dayData.length} اشتراك في هذا اليوم`;
+  const totalUSD = dayData.reduce((s, x) => s + x.netAmountUSD, 0);
+  const silver = dayData.filter(s => s.package === 'فضية');
+  const gold = dayData.filter(s => s.package === 'ذهبية');
+  const revenueCard = hasPermission('canViewRevenue')
+    ? `<div class="bg-emerald-50 rounded-lg p-3 text-center"><p class="text-xs text-emerald-700">إيرادات اليوم</p><p class="text-xl font-bold text-emerald-900">$${formatNumber(totalUSD, 2)}</p></div>` : '';
+  const gridCols = hasPermission('canViewRevenue') ? 'grid-cols-3' : 'grid-cols-2';
+  let html = `<div class="grid ${gridCols} gap-3 mb-5">${revenueCard}<div class="pkg-silver rounded-lg p-3 text-center"><p class="text-xs">فضية</p><p class="text-xl font-bold">${silver.length}</p></div><div class="pkg-gold rounded-lg p-3 text-center"><p class="text-xs">ذهبية</p><p class="text-xl font-bold">${gold.length}</p></div></div><div class="space-y-2">`;
+  dayData.forEach(s => {
+    const pkgClass = s.package === 'فضية' ? 'pkg-silver' : 'pkg-gold';
+    const empClass = s.convincedBy === 'حنان' ? 'badge-emp-hanan' : s.convincedBy === 'ميار' ? 'badge-emp-mayar' : 'badge-emp-medo';
+    const amountHtml = hasPermission('canViewRevenue') ? `<span class="text-sm font-bold text-emerald-700">$${formatNumber(s.netAmountUSD, 2)}</span>` : '';
+    html += `<div class="border border-slate-200 rounded-lg p-3 flex items-center justify-between flex-wrap gap-2"><div><p class="font-bold text-slate-800">${s.name}</p><p class="text-xs text-slate-500">${getResidenceLabel(s.residence || s.country)} · ${s.dialCode || ''}${s.phone || ''}</p></div><div class="flex items-center gap-2 flex-wrap"><span class="${pkgClass} text-xs px-2 py-1 rounded font-bold">${s.package}</span><span class="text-xs ${empClass} px-2 py-1 rounded font-semibold">${s.convincedBy || '-'}</span>${amountHtml}</div></div>`;
+  });
+  html += '</div>';
+  document.getElementById('dayModalBody').innerHTML = html;
+  document.getElementById('dayModal').classList.add('active');
+}
+
+function closeDayModal() {
+  document.getElementById('dayModal').classList.remove('active');
+}
+
+function populateCountrySelects() {
+  const residenceOptions = [
+    ...residenceCountries.map(c => `<option value="${c.value}">${c.name}</option>`),
+    ...phoneCountries.map(c => `<option value="${c.iso}">${c.name}</option>`)
+  ].join('');
+  document.getElementById('f_residence').innerHTML = '<option value="">اختر الإقامة...</option>' + residenceOptions;
+  document.getElementById('f_phoneCountry').innerHTML = '<option value="">اختر دولة رقم الهاتف...</option>' + phoneCountries.map(c => `<option value="${c.iso}">${c.name} (${c.dialCode})</option>`).join('');
+}
+
+function updateStats(data) {
+  const total = data.length;
+  const withdrawn = data.filter(s => s.subscriptionState === 'withdrawn').length;
+  const activeForExpiry = data.filter(s => s.subscriptionState !== 'withdrawn');
+  const grossUSD = data.reduce((sum, s) => sum + s.amountUSD, 0);
+  const refundUSD = data.reduce((sum, s) => sum + s.refundAmountUSD, 0);
+  const netUSD = data.reduce((sum, s) => sum + s.netAmountUSD, 0);
+  const expiring = activeForExpiry.filter(s => s.status === 'ينتهي قريباً').length;
+  const avgUSD = total > 0 ? netUSD / total : 0;
+  const silver = data.filter(s => s.package === 'فضية');
+  const gold = data.filter(s => s.package === 'ذهبية');
+  const totalRemaining = data.reduce((sum, s) => sum + s.remainingAmountUSD, 0);
+  document.getElementById('totalSubs').textContent = formatNumber(total);
+  document.getElementById('withdrawnCountText').textContent = `منسحب: ${formatNumber(withdrawn)}`;
+  document.getElementById('netRevenueUSD').textContent = hasPermission('canViewRevenue') ? formatNumber(netUSD, 2) : 'مخفي';
+  document.getElementById('grossRefundText').textContent = hasPermission('canViewRevenue') ? `مدفوعات: $${formatNumber(grossUSD, 2)} / مسترد: $${formatNumber(refundUSD, 2)}` : 'الإيرادات تظهر للإدارة فقط';
+  document.getElementById('expiringCount').textContent = formatNumber(expiring);
+  if (document.getElementById('totalRemainingUSD')) {
+    document.getElementById('totalRemainingUSD').textContent = hasPermission('canViewRevenue') ? formatNumber(totalRemaining, 2) : 'مخفي';
+  }
+  document.getElementById('silverCount').textContent = formatNumber(silver.length);
+  document.getElementById('silverRevenue').textContent = hasPermission('canViewRevenue') ? formatNumber(silver.reduce((s, x) => s + x.netAmountUSD, 0), 2) : 'مخفي';
+  document.getElementById('goldCount').textContent = formatNumber(gold.length);
+  document.getElementById('goldRevenue').textContent = hasPermission('canViewRevenue') ? formatNumber(gold.reduce((s, x) => s + x.netAmountUSD, 0), 2) : 'مخفي';
+  document.getElementById('alertsBadge').textContent = expiring + activeForExpiry.filter(s => s.status === 'منتهي').length;
+}
+
+function updateTeamPerformance(data) {
+  if (!hasPermission('canViewRevenue')) {
+    document.getElementById('teamPerformance').innerHTML = '<div class="text-center text-slate-400 py-8">تقارير الإيرادات متاحة للإدارة فقط</div>';
+    return;
+  }
+  const employees = ['حنان', 'ميار', 'ميدو'];
+  const colors = { 'حنان': ['bg-purple-100','text-purple-700','bg-purple-500'], 'ميار': ['bg-teal-100','text-teal-700','bg-teal-500'], 'ميدو': ['bg-orange-100','text-orange-700','bg-orange-500'] };
+  const stats = employees.map(emp => {
+    const empData = data.filter(s => s.convincedBy === emp);
+    return { name: emp, count: empData.length, revenueUSD: empData.reduce((sum, x) => sum + x.netAmountUSD, 0) };
+  }).sort((a, b) => b.revenueUSD - a.revenueUSD);
+  const maxRevenue = Math.max(...stats.map(s => s.revenueUSD), 1);
+  const totalUSD = stats.reduce((sum, x) => sum + x.revenueUSD, 0);
+  document.getElementById('teamPerformance').innerHTML = stats.map((s, i) => {
+    const [bg, text, bar] = colors[s.name];
+    const pct = totalUSD > 0 ? (s.revenueUSD / totalUSD * 100) : 0;
+    return `<div><div class="flex items-center justify-between mb-2"><div class="flex items-center gap-2"><span class="text-xs text-slate-400">#${i + 1}</span><span class="${bg} ${text} px-3 py-1 rounded-lg font-semibold text-sm">${s.name}</span><span class="text-xs text-slate-500">${s.count} مشترك</span></div><div class="text-left"><p class="font-bold text-slate-800">$${formatNumber(s.revenueUSD, 2)}</p><p class="text-xs text-slate-500">${pct.toFixed(1)}%</p></div></div><div class="bg-slate-100 rounded-full h-2 overflow-hidden"><div class="${bar} h-full rounded-full" style="width:${s.revenueUSD / maxRevenue * 100}%"></div></div></div>`;
+  }).join('');
+}
+
+function updateAlerts(data) {
+  const expiring = data.filter(s => s.subscriptionState !== 'withdrawn' && (s.status === 'ينتهي قريباً' || s.status === 'منتهي')).sort((a, b) => a.daysRemaining - b.daysRemaining).slice(0, 5);
+  document.getElementById('alertsList').innerHTML = expiring.length === 0 ? '<div class="px-6 py-8 text-center text-slate-400">لا توجد تنبيهات</div>' : expiring.map(s => {
+    const isExpired = s.status === 'منتهي';
+    const text = isExpired ? `منتهي منذ ${Math.abs(s.daysRemaining)} يوم` : `ينتهي خلال ${s.daysRemaining} يوم`;
+    const color = isExpired ? 'text-red-600 bg-red-50' : 'text-amber-600 bg-amber-50';
+    return `<div class="px-6 py-3 flex items-center justify-between hover:bg-slate-50"><div><p class="font-medium text-slate-800">${s.name}</p><p class="text-xs text-slate-500">${s.dialCode || ''}${s.phone || ''} · ${s.package}</p></div><div class="text-left"><span class="text-xs px-2 py-1 rounded-full font-semibold ${color}">${text}</span><p class="text-xs text-slate-400 mt-1">المسؤول: ${s.convincedBy || '-'}</p></div></div>`;
+  }).join('');
+}
+
+function updateTable(data) {
+  document.getElementById('subsTableBody').innerHTML = data.map((s, i) => {
+    const statusClass = s.status === 'نشط' ? 'status-active' : s.status === 'ينتهي قريباً' ? 'status-expiring' : s.status === 'منسحب' ? 'status-withdrawn' : 'status-expired';
+    const empClass = s.convincedBy === 'حنان' ? 'badge-emp-hanan' : s.convincedBy === 'ميار' ? 'badge-emp-mayar' : 'badge-emp-medo';
+    const pkgClass = s.package === 'فضية' ? 'pkg-silver' : 'pkg-gold';
+    const refundText = hasPermission('canViewRevenue') && s.refundAmountUSD > 0 ? `$${formatNumber(s.refundAmountUSD, 2)}` : '-';
+    const netText = hasPermission('canViewRevenue') ? `$${formatNumber(s.netAmountUSD, 2)}` : 'مخفي';
+    const totalText = hasPermission('canViewRevenue') ? `$${formatNumber(s.totalPriceUSD, 2)}` : 'مخفي';
+
+    // Payment progress cell
+    let payCell = 'مخفي';
+    if (hasPermission('canViewRevenue')) {
+      const paidUSD = s.paidAmountUSD;
+      const totalUSD = s.totalPriceUSD || s.amountUSD;
+      const remUSD = s.remainingAmountUSD;
+      const pct = totalUSD > 0 ? Math.min(100, (paidUSD / totalUSD) * 100) : 100;
+      const isPartial = remUSD > 0.01;
+      payCell = `<div>
+        <span class="font-semibold text-emerald-700 text-xs">$${formatNumber(paidUSD, 2)}</span>
+        ${isPartial ? `<span class="text-xs text-amber-600 mr-1">/ متبقي $${formatNumber(remUSD, 2)}</span>` : ''}
+        <div class="pay-bar"><div class="pay-bar-fill ${isPartial ? 'partial' : ''}" style="width:${pct}%"></div></div>
+      </div>`;
+    }
+
+    // Action buttons (fixed ternary)
+    const editBtn = hasPermission('canEdit') ? `<button onclick="openEditModal('${s.id}')" class="px-2 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs">تعديل</button>` : '';
+    const payBtn = hasPermission('canCreate') && s.subscriptionState !== 'withdrawn' ? `<button onclick="openAddPaymentModal('${s.id}')" class="px-2 py-1 rounded bg-sky-50 text-sky-700 hover:bg-sky-100 text-xs">دفعة</button>` : '';
+    const histBtn = `<button onclick="openViewPaymentsModal('${s.id}')" class="px-2 py-1 rounded bg-slate-50 text-slate-600 hover:bg-slate-100 text-xs">سجل</button>`;
+    const withdrawBtn = !hasPermission('canWithdraw') ? '' : (s.subscriptionState === 'withdrawn'
+      ? `<button onclick="openWithdrawModal('${s.id}')" class="px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 text-xs">تعديل الانسحاب</button>`
+      : `<button onclick="openWithdrawModal('${s.id}')" class="px-2 py-1 rounded bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs">انسحاب</button>`);
+    const deleteBtn = hasPermission('canDelete') ? `<button onclick="deleteSubscriber('${s.id}', '${escapeAttr(s.name)}')" class="px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100 text-xs">حذف</button>` : '';
+
+    return `<tr class="hover:bg-slate-50">
+      <td class="px-4 py-3 text-slate-400 text-xs">${i + 1}</td>
+      <td class="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">${formatDate(s.date)}</td>
+      <td class="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">${escapeHtml(s.name || '-')}</td>
+      <td class="px-4 py-3 text-slate-600 text-xs font-mono whitespace-nowrap" dir="ltr">${s.dialCode || ''} ${s.phone || ''}</td>
+      <td class="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">${getResidenceLabel(s.residence || s.country)}</td>
+      <td class="px-4 py-3"><span class="${pkgClass} text-xs px-2 py-1 rounded font-bold whitespace-nowrap">${s.package || '-'}</span></td>
+      <td class="px-4 py-3 whitespace-nowrap text-xs text-slate-600">${totalText}</td>
+      <td class="px-4 py-3 bg-emerald-50/30 whitespace-nowrap">${payCell}</td>
+      <td class="px-4 py-3 whitespace-nowrap text-rose-700 text-xs">${refundText}</td>
+      <td class="px-4 py-3 bg-emerald-50/50 whitespace-nowrap"><span class="font-bold text-emerald-700">${netText}</span></td>
+      <td class="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">${formatDate(s.expiryDate)}</td>
+      <td class="px-4 py-3"><span class="text-xs px-2 py-1 rounded-full font-semibold ${statusClass} whitespace-nowrap">${s.status}</span></td>
+      <td class="px-4 py-3"><span class="text-xs px-2 py-1 rounded font-semibold ${empClass}">${s.convincedBy || '-'}</span></td>
+      <td class="px-4 py-3"><div class="flex gap-1 flex-wrap whitespace-nowrap">${editBtn}${payBtn}${histBtn}${withdrawBtn}${deleteBtn}</div></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="14" class="px-4 py-8 text-center text-slate-400">لا توجد بيانات</td></tr>';
+  document.getElementById('subsCount').textContent = `عرض ${data.length} مشترك من ${sampleData.length}`;
+}
+
+function applyFilters() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const emp = document.getElementById('filterEmployee').value;
+  const pkg = document.getElementById('filterPackage').value;
+  const status = document.getElementById('filterStatus').value;
+  const filtered = sampleData.filter(s =>
+    (!search || String(s.name || '').toLowerCase().includes(search) || String(s.phone || '').includes(search)) &&
+    (!emp || s.convincedBy === emp) &&
+    (!pkg || s.package === pkg) &&
+    (!status || s.status === status)
+  );
+  updateTable(filtered);
+}
+
+function applyRoleUi() {
+  const label = `${currentUserProfile.name || currentUserProfile.email} - ${roleLabels[currentUserProfile.role] || currentUserProfile.role}`;
+  document.getElementById('currentUserLabel').textContent = ` | ${label}`;
+  document.getElementById('sideUserRole').textContent = label;
+  document.querySelectorAll('[data-permission]').forEach(el => {
+    el.classList.toggle('hidden', !hasPermission(el.dataset.permission));
+  });
+  const convinced = document.getElementById('f_convinced');
+  if (currentUserProfile.role === 'employee') {
+    convinced.value = currentUserProfile.employeeName || currentUserProfile.name || '';
+    convinced.disabled = true;
+  } else {
+    convinced.disabled = false;
+  }
+}
+
+function renderUsersAdmin() {
+  const body = document.getElementById('usersAdminBody');
+  if (!body) return;
+  if (!hasPermission('canManageUsers')) {
+    body.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">إدارة المستخدمين متاحة للمالك فقط</td></tr>';
+    return;
+  }
+  body.innerHTML = usersData.map(user => {
+    const isCurrentUser = user.uid === currentUserProfile?.uid;
+    const roleOptions = ['owner', 'admin', 'employee'].map(role =>
+      `<option value="${role}" ${user.role === role ? 'selected' : ''}>${roleLabels[role] || role}</option>`
+    ).join('');
+    const updated = user.updatedAt ? formatDateTime(user.updatedAt) : '-';
+    return `<tr class="hover:bg-slate-50">
+      <td class="px-4 py-3 min-w-[260px]">
+        <input id="user_name_${user.uid}" value="${escapeAttr(user.name || '')}" class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm mb-1" placeholder="الاسم">
+        <p class="text-xs text-slate-400 font-mono" dir="ltr">${user.uid}</p>
+        ${user.email ? `<p class="text-xs text-slate-500" dir="ltr">${escapeHtml(user.email)}</p>` : ''}
+      </td>
+      <td class="px-4 py-3">
+        <select id="user_role_${user.uid}" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" ${isCurrentUser ? 'disabled title="لا تغيّر دور حسابك الحالي من هنا"' : ''}>${roleOptions}</select>
+      </td>
+      <td class="px-4 py-3"><input id="user_employee_${user.uid}" value="${escapeAttr(user.employeeName || '')}" class="w-40 border border-slate-300 rounded-lg px-3 py-1.5 text-sm" placeholder="مثال: حنان"></td>
+      <td class="px-4 py-3">
+        <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+          <input id="user_active_${user.uid}" type="checkbox" ${user.active ? 'checked' : ''} ${isCurrentUser ? 'disabled title="لا تعطل حسابك الحالي"' : ''}>
+          فعّال
+        </label>
+      </td>
+      <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">${updated}</td>
+      <td class="px-4 py-3"><button onclick="saveUserProfile('${user.uid}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">حفظ</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">لا توجد بيانات مستخدمين</td></tr>';
+}
+
+async function saveUserProfile(uid) {
+  if (!hasPermission('canManageUsers')) return showNotice('لا تملك صلاحية إدارة المستخدمين.', 'error');
+  const existing = usersData.find(u => u.uid === uid);
+  if (!existing) return;
+  const isCurrentUser = uid === currentUserProfile?.uid;
+  const payload = {
+    name: document.getElementById('user_name_' + uid).value.trim(),
+    employeeName: document.getElementById('user_employee_' + uid).value.trim(),
+    updatedBy: currentUserProfile.uid,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+  };
+  if (!isCurrentUser) {
+    payload.role = document.getElementById('user_role_' + uid).value;
+    payload.active = document.getElementById('user_active_' + uid).checked;
+  }
+  try {
+    await db.collection('users').doc(uid).update(payload);
+    toast('تم حفظ بيانات المستخدم');
+  } catch (error) {
+    showNotice('فشل حفظ المستخدم: ' + error.message, 'error');
+  }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/`/g, '&#96;');
+}
+
+function formatDateTime(value) {
+  const date = typeof value?.toDate === 'function' ? value.toDate() : new Date(getMillis(value));
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('ar-EG', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function openAddModal() {
+  if (!hasPermission('canCreate')) return showNotice('لا تملك صلاحية إضافة مشترك.', 'error');
+  document.getElementById('subscriberForm').reset();
+  document.getElementById('editingId').value = '';
+  document.getElementById('subscriberModalTitle').textContent = 'إضافة مشترك جديد';
+  document.getElementById('saveSubscriberBtn').textContent = 'حفظ المشترك';
+  document.getElementById('editStateInfo').classList.add('hidden');
+  document.getElementById('referrerWrap').classList.add('hidden');
+  document.getElementById('f_date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('f_residence').value = 'فلسطين-غزة';
+  document.getElementById('f_phoneCountry').value = 'PS';
+  if (currentUserProfile?.role === 'employee') {
+    document.getElementById('f_convinced').value = currentUserProfile.employeeName || currentUserProfile.name || '';
+    document.getElementById('f_convinced').disabled = true;
+  } else {
+    document.getElementById('f_convinced').disabled = false;
+  }
+  updateDialCode();
+  document.getElementById('subscriberModal').classList.add('active');
+}
+function openEditModal(id) {
+  if (!hasPermission('canEdit')) return showNotice('لا تملك صلاحية تعديل المشتركين.', 'error');
+  const s = sampleData.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('subscriberForm').reset();
+  document.getElementById('editingId').value = id;
+  document.getElementById('subscriberModalTitle').textContent = 'تعديل بيانات المشترك';
+  document.getElementById('saveSubscriberBtn').textContent = 'حفظ التعديلات';
+  document.getElementById('f_date').value = s.date || '';
+  document.getElementById('f_name').value = s.name || '';
+  document.getElementById('f_residence').value = s.residence || s.country || '';
+  document.getElementById('f_phoneCountry').value = s.phoneCountry || phoneCountries.find(c => c.dialCode === s.dialCode)?.iso || '';
+  document.getElementById('f_phone').value = s.phone || '';
+  document.getElementById('f_age').value = s.age || '';
+  document.querySelector(`input[name="package"][value="${s.package}"]`)?.click();
+  document.getElementById('f_duration').value = s.duration || '';
+  document.getElementById('f_currency').value = s.currencyOriginal || s.currency || 'USD';
+  document.getElementById('f_payment').value = s.payment || '';
+  document.getElementById('f_source').value = s.source || '';
+  document.getElementById('f_referrer').value = s.referrer || '';
+  document.getElementById('f_convinced').value = s.convincedBy || '';
+  document.getElementById('f_paidshift').value = s.paidShift || '';
+  document.querySelector(`input[name="team"][value="${s.team}"]`)?.click();
+  document.getElementById('f_notes').value = s.notes || '';
+  toggleReferrerField();
+  updateDialCode();
+  const info = document.getElementById('editStateInfo');
+  info.textContent = s.subscriptionState === 'withdrawn' ? `هذا المشترك منسحب. المسترد: $${formatNumber(s.refundAmountUSD, 2)}، الصافي: $${formatNumber(s.netAmountUSD, 2)}` : 'هذا التعديل يغير بيانات المشترك ولا يغير حالة الانسحاب.';
+  info.classList.remove('hidden');
+  document.getElementById('subscriberModal').classList.add('active');
+}
+function closeSubscriberModal() {
+  document.getElementById('subscriberModal').classList.remove('active');
+}
+function updateDialCode() {
+  const iso = document.getElementById('f_phoneCountry').value;
+  document.getElementById('f_dialcode_display').textContent = phoneCountries.find(c => c.iso === iso)?.dialCode || '+';
+}
+function toggleReferrerField() {
+  document.getElementById('referrerWrap').classList.toggle('hidden', document.getElementById('f_source').value !== 'ترشيح');
+}
+
+document.getElementById('subscriberForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!db) return showNotice('Firebase غير جاهز للحفظ.', 'error');
+  const btn = document.getElementById('saveSubscriberBtn');
+  btn.disabled = true; btn.textContent = 'جاري الحفظ...';
+  try {
+    const id          = document.getElementById('editingId').value;
+    const phoneCountry = document.getElementById('f_phoneCountry').value;
+    const dialCode    = phoneCountries.find(c => c.iso === phoneCountry)?.dialCode || '+';
+    const currency    = document.getElementById('f_currency').value;
+    const lockedRate  = currentExchangeRates[currency] || 1;
+    const duration    = Number(document.getElementById('f_duration').value);
+    const date        = document.getElementById('f_date').value;
+    const totalPrice  = Number(document.getElementById('f_totalPrice').value);
+    const totalPriceUSD = totalPrice / lockedRate;
+    const old = id ? sampleData.find(s => s.id === id) : null;
+    const refundAmountUSD = old?.refundAmountUSD || 0;
+    const convincedBy = currentUserProfile.role === 'employee'
+      ? (currentUserProfile.employeeName || currentUserProfile.name || '')
+      : document.getElementById('f_convinced').value;
+
+    // ── Determine paid / remaining ──────────────────────────────────────
+    let paidAmount, remainingAmount, paidAmountUSD, remainingAmountUSD;
+
+    if (!id) {
+      // Creating: read initial-payment field (empty = full payment, 0 = deferred)
+      const initialPaymentInput = document.getElementById('f_initialPayment').value;
+
+      if (initialPaymentInput === '' || initialPaymentInput === null) {
+        paidAmount = totalPrice;
+      } else {
+        paidAmount = Number(initialPaymentInput);
+      }
+
+      remainingAmount = totalPrice - paidAmount;
+      paidAmountUSD      = paidAmount      / lockedRate;
+      remainingAmountUSD = remainingAmount / lockedRate;
+    } else {
+      // Editing: preserve whatever was paid; recalculate remaining against new totalPrice
+      paidAmountUSD      = old?.paidAmountUSD ?? totalPriceUSD;
+      paidAmount         = old?.paidAmount    ?? (paidAmountUSD * lockedRate);
+      remainingAmountUSD = Math.max(0, totalPriceUSD - paidAmountUSD);
+      remainingAmount    = Math.max(0, totalPrice     - paidAmount);
+    }
+    const netAmountUSD = Math.max(0, paidAmountUSD - refundAmountUSD);
+
+    const payload = {
+      date,
+      name: document.getElementById('f_name').value.trim(),
+      residence: document.getElementById('f_residence').value,
+      phoneCountry, dialCode,
+      phone: document.getElementById('f_phone').value.trim(),
+      age: Number(document.getElementById('f_age').value) || null,
+      package:  document.querySelector('input[name="package"]:checked').value,
+      duration,
+      currencyOriginal: currency, currency, lockedRate,
+      totalPrice, totalPriceUSD,
+      amount: totalPrice, amountUSD: totalPriceUSD, // legacy
+      paidAmount, paidAmountUSD,
+      remainingAmount, remainingAmountUSD,
+      netAmountUSD,
+      expiryDate: calculateExpiry(date, duration),
+      payment:    document.getElementById('f_payment').value,
+      source:     document.getElementById('f_source').value,
+      referrer:   document.getElementById('f_referrer').value.trim(),
+      convincedBy,
+      paidShift: document.getElementById('f_paidshift').value,
+      team:      document.querySelector('input[name="team"]:checked').value,
+      notes:     document.getElementById('f_notes').value.trim(),
+      updatedBy: currentUserProfile.uid,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (id) {
+      await db.collection('subscribers').doc(id).update(payload);
+      await writeAuditLog('subscriber_updated', { targetType:'subscriber', targetId:id, targetName:payload.name, summary:`تم تعديل بيانات المشترك: ${payload.name}` });
+      toast('تم تعديل بيانات المشترك');
+    } else {
+      // Pre-generate ID so we can link the receipt and first payment
+      const subscriberRef = db.collection('subscribers').doc();
+      const newId = subscriberRef.id;
+
+      // Upload receipt if provided (non-fatal)
+      let receiptData = null;
+      const rf = document.getElementById('f_receipt')?.files?.[0];
+      if (rf) { btn.textContent = 'جاري رفع الوصل...'; try { receiptData = await uploadReceiptFile(rf, newId); } catch(_){} }
+
+      const batch = db.batch();
+      batch.set(subscriberRef, {
+        ...payload,
+        subscriptionState: 'active',
+        refundAmount: 0, refundAmountUSD: 0,
+        createdBy: currentUserProfile.uid,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      if (paidAmount > 0) {
+        batch.set(db.collection('payments').doc(), {
+          subscriberId:     newId,
+          subscriberName:   payload.name,
+          amountOriginal:   paidAmount,        // exact original-currency amount
+          currencyOriginal: currency,
+          exchangeRate:     lockedRate,
+          amountUSD:        paidAmountUSD,
+          paymentMethod:   payload.payment,
+          receiptUrl:      receiptData?.url  || null,
+          receiptType:     receiptData?.type || null,
+          date,
+          notes: null,
+          isInitialPayment: true,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          createdBy: currentUserProfile.uid,
+        });
+      }
+      await batch.commit();
+      await writeAuditLog('subscriber_created', { targetType:'subscriber', targetId:newId, targetName:payload.name, summary:`تم إضافة مشترك جديد: ${payload.name}` });
+      toast('تم حفظ المشترك في Firebase');
+    }
+    closeSubscriberModal();
+  } catch (error) {
+    showNotice('فشل الحفظ: ' + error.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = document.getElementById('editingId').value ? 'حفظ التعديلات' : 'حفظ المشترك';
+  }
+});
+
+function openWithdrawModal(id) {
+  if (!hasPermission('canWithdraw')) return showNotice('لا تملك صلاحية تسجيل الانسحاب.', 'error');
+  const s = sampleData.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('withdrawForm').reset();
+  document.getElementById('withdrawId').value = id;
+  document.getElementById('withdrawSubName').textContent = `${s.name} - المدفوع $${formatNumber(s.amountUSD, 2)}`;
+  document.getElementById('w_date').value = s.withdrawnAt || new Date().toISOString().split('T')[0];
+  document.getElementById('w_reason').value = s.withdrawalReason || '';
+  document.getElementById('w_refundAmount').value = s.refundAmount || 0;
+  document.getElementById('w_refundCurrency').value = s.refundCurrency || s.currency || 'USD';
+  document.getElementById('withdrawModal').classList.add('active');
+}
+function closeWithdrawModal() {
+  document.getElementById('withdrawModal').classList.remove('active');
+}
+document.getElementById('withdrawForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!db) return showNotice('Firebase غير جاهز للحفظ.', 'error');
+  const id = document.getElementById('withdrawId').value;
+  const s = sampleData.find(x => x.id === id);
+  if (!s) return;
+  const btn = document.getElementById('saveWithdrawBtn');
+  btn.disabled = true;
+  btn.textContent = 'جاري الحفظ...';
+  try {
+    const refundCurrency = document.getElementById('w_refundCurrency').value;
+    const refundAmount = Number(document.getElementById('w_refundAmount').value || 0);
+    const refundRate = currentExchangeRates[refundCurrency] || 1;
+    const refundAmountUSD = refundAmount / refundRate;
+    await db.collection('subscribers').doc(id).update({
+      subscriptionState: 'withdrawn',
+      withdrawnAt: document.getElementById('w_date').value,
+      withdrawalReason: document.getElementById('w_reason').value.trim(),
+      refundAmount,
+      refundCurrency,
+      refundRate,
+      refundAmountUSD,
+      netAmountUSD: Math.max(0, s.amountUSD - refundAmountUSD),
+      updatedBy: currentUserProfile.uid,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    await writeAuditLog('subscriber_withdrawn', {
+      targetType: 'subscriber',
+      targetId: id,
+      targetName: s.name || '',
+      summary: `تم تسجيل انسحاب: ${s.name || ''} - مسترد $${formatNumber(refundAmountUSD, 2)}`,
+      metadata: { refundAmount, refundCurrency, refundAmountUSD }
+    });
+    closeWithdrawModal();
+    toast('تم تسجيل الانسحاب والاسترداد');
+  } catch (error) {
+    showNotice('فشل تسجيل الانسحاب: ' + error.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'حفظ الانسحاب';
+  }
+});
+
+function openExchangeRatesModal() {
+  document.getElementById('ratesEditor').innerHTML = Object.entries(currencyInfo).filter(([k]) => k !== 'USD').map(([code, info]) => `<div class="flex items-center gap-3 p-3 border border-slate-200 rounded-lg"><div class="flex-1"><p class="font-medium text-slate-800">${info.name}</p><p class="text-xs text-slate-500">كم وحدة تساوي 1 دولار</p></div><input id="rate_${code}" type="number" step="0.01" value="${currentExchangeRates[code]}" class="w-24 border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-center font-mono"></div>`).join('');
+  document.getElementById('exchangeRatesModal').classList.add('active');
+}
+function closeExchangeRatesModal() {
+  document.getElementById('exchangeRatesModal').classList.remove('active');
+}
+function saveExchangeRates() {
+  ['EGP','JOD','ILS'].forEach(code => {
+    const val = Number(document.getElementById('rate_' + code).value);
+    if (val > 0) currentExchangeRates[code] = val;
+  });
+  closeExchangeRatesModal();
+}
+function toast(message) {
+  const el = document.createElement('div');
+  el.className = 'fixed top-4 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 text-sm font-bold';
+  el.textContent = message;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+async function writeAuditLog(action, details = {}) {
+  if (!db || !currentUserProfile) return;
+  try {
+    await db.collection('auditLogs').add({
+      action,
+      actorUid: currentUserProfile.uid,
+      actorName: currentUserProfile.name || currentUserProfile.email || '',
+      actorRole: currentUserProfile.role || '',
+      ...details,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    console.warn('audit log failed', error);
+  }
+}
+
+function renderAll() {
+  updateStats(sampleData);
+  updateTeamPerformance(sampleData);
+  updateAlerts(sampleData);
+  applyFilters();
+  renderCalendar();
+  populateAdvancedStatsFilters();
+  renderAdvancedStats();
+}
+
+// ==================== رفع الملفات ====================
+async function uploadReceiptFile(file, subscriberId) {
+  if (!file) return null;
+  if (file.size > 5 * 1024 * 1024) throw new Error('الملف أكبر من 5MB');
+  if (!['image/jpeg','image/png','application/pdf'].includes(file.type)) throw new Error('نوع الملف غير مدعوم (JPG, PNG, PDF فقط)');
+  if (!storage) throw new Error('Firebase Storage غير جاهز');
+  const isImage = file.type.startsWith('image/');
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `receipts/${subscriberId}/${Date.now()}_${safeName}`;
+  const snap = await storage.ref(path).put(file, { contentType: file.type });
+  const url = await snap.ref.getDownloadURL();
+  return { url, type: isImage ? 'image' : 'pdf' };
+}
+
+function previewReceiptFile(inputEl, previewEl) {
+  if (!previewEl) return;
+  const file = inputEl?.files?.[0];
+  if (!file) { previewEl.innerHTML = ''; return; }
+  if (file.type.startsWith('image/')) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      previewEl.innerHTML = `<img src="${ev.target.result}" class="h-24 w-auto object-contain rounded border border-slate-200 mt-2">`;
+    };
+    reader.readAsDataURL(file);
+  } else {
+    previewEl.innerHTML = `<div class="flex items-center gap-2 mt-2 text-sm text-slate-600 bg-slate-50 rounded-lg p-2 border border-slate-200"><span class="text-2xl">📄</span><span class="truncate">${escapeHtml(file.name)}</span></div>`;
+  }
+}
+
+// ==================== مودال إضافة دفعة ====================
+function openAddPaymentModal(subscriberId) {
+  if (!hasPermission('canCreate')) return showNotice('لا تملك صلاحية إضافة دفعة.', 'error');
+  const sub = sampleData.find(s => s.id === subscriberId);
+  if (!sub) return;
+  document.getElementById('addPaymentForm').reset();
+  document.getElementById('ap_subscriberId').value = subscriberId;
+  document.getElementById('ap_date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('ap_currency').value = sub.currencyOriginal || sub.currency || 'USD';
+  document.getElementById('ap_receiptPreview').innerHTML = '';
+  document.getElementById('ap_subInfo').textContent = sub.name;
+
+  const totalUSD = sub.totalPriceUSD || sub.amountUSD || 0;
+  const paidUSD  = sub.paidAmountUSD || sub.amountUSD || 0;
+  const remUSD   = sub.remainingAmountUSD || 0;
+  const pct = totalUSD > 0 ? Math.min(100, (paidUSD / totalUSD) * 100) : 100;
+  const isPartial = remUSD > 0.01;
+  document.getElementById('ap_summaryBar').innerHTML = hasPermission('canViewRevenue') ? `
+    <div class="grid grid-cols-3 gap-2 text-center mb-3 text-xs">
+      <div class="bg-slate-50 rounded p-2"><p class="text-slate-500">الكلي</p><p class="font-bold text-slate-800">$${formatNumber(totalUSD,2)}</p></div>
+      <div class="bg-emerald-50 rounded p-2"><p class="text-emerald-600">محصّل</p><p class="font-bold text-emerald-700">$${formatNumber(paidUSD,2)}</p></div>
+      <div class="bg-amber-50 rounded p-2"><p class="text-amber-600">متبقي</p><p class="font-bold text-amber-700">$${formatNumber(remUSD,2)}</p></div>
+    </div>
+    <div class="pay-bar"><div class="pay-bar-fill ${isPartial?'partial':''}" style="width:${pct}%"></div></div>` : '';
+
+  document.getElementById('addPaymentModal').classList.add('active');
+}
+function closeAddPaymentModal() {
+  document.getElementById('addPaymentModal').classList.remove('active');
+}
+
+document.getElementById('addPaymentForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!db) return showNotice('Firebase غير جاهز.', 'error');
+  const btn = document.getElementById('ap_submitBtn');
+  btn.disabled = true; btn.textContent = 'جاري الحفظ...';
+  try {
+    const subscriberId = document.getElementById('ap_subscriberId').value;
+    const sub = sampleData.find(s => s.id === subscriberId);
+    if (!sub) throw new Error('المشترك غير موجود');
+    const currency    = document.getElementById('ap_currency').value;
+    const amountOrig  = Number(document.getElementById('ap_amount').value);
+    const rate        = currentExchangeRates[currency] || 1;
+    const amountUSD   = amountOrig / rate;
+    const method      = document.getElementById('ap_paymentMethod').value;
+    const date        = document.getElementById('ap_date').value;
+    const notes       = document.getElementById('ap_notes').value.trim();
+
+    // Upload receipt (optional, non-fatal)
+    let receiptData = null;
+    const rf = document.getElementById('ap_receipt')?.files?.[0];
+    if (rf) { btn.textContent = 'جاري رفع الوصل...'; try { receiptData = await uploadReceiptFile(rf, subscriberId); } catch(_){} }
+
+    // Atomic batch: add payment + update subscriber totals
+    const subscriberRef = db.collection('subscribers').doc(subscriberId);
+    const paymentRef    = db.collection('payments').doc();
+
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(subscriberRef);
+      const d    = snap.data();
+      const newPaidUSD  = (d.paidAmountUSD ?? d.amountUSD ?? 0) + amountUSD;
+      const totalUSD    = d.totalPriceUSD  ?? d.amountUSD ?? 0;
+      const newRemUSD   = Math.max(0, totalUSD - newPaidUSD);
+      const newNetUSD   = Math.max(0, newPaidUSD - (d.refundAmountUSD || 0));
+      const newPaidOrig = (d.paidAmount ?? d.amount ?? 0) + amountOrig;
+
+      tx.set(paymentRef, {
+        subscriberId,
+        subscriberName: sub.name,
+        amountOriginal: amountOrig,
+        currencyOriginal: currency,
+        exchangeRate: rate,
+        amountUSD,
+        paymentMethod: method,
+        date,
+        notes: notes || null,
+        receiptUrl:  receiptData?.url  || null,
+        receiptType: receiptData?.type || null,
+        isInitialPayment: false,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        createdBy: currentUserProfile.uid,
+      });
+      tx.update(subscriberRef, {
+        paidAmountUSD:      newPaidUSD,
+        paidAmount:         newPaidOrig,
+        remainingAmountUSD: newRemUSD,
+        netAmountUSD:       newNetUSD,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedBy: currentUserProfile.uid,
+      });
+    });
+
+    await writeAuditLog('payment_added', {
+      targetType: 'subscriber', targetId: subscriberId, targetName: sub.name,
+      summary: `دفعة $${formatNumber(amountUSD,2)} لـ ${sub.name}`,
+    });
+    closeAddPaymentModal();
+    toast('تم تسجيل الدفعة بنجاح');
+  } catch (err) {
+    showNotice('فشل حفظ الدفعة: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'حفظ الدفعة';
+  }
+});
+
+// ==================== مودال سجل الدفعات ====================
+async function openViewPaymentsModal(subscriberId) {
+  const sub = sampleData.find(s => s.id === subscriberId);
+  if (!sub) return;
+  document.getElementById('vp_title').textContent    = `سجل دفعات: ${escapeHtml(sub.name)}`;
+  document.getElementById('vp_subtitle').textContent = `الباقة: ${sub.package} · ${formatDate(sub.date)}`;
+  document.getElementById('vp_body').innerHTML = '<div class="text-center text-slate-400 py-8">جاري التحميل...</div>';
+  document.getElementById('viewPaymentsModal').classList.add('active');
+  try {
+    const snap = await db.collection('payments')
+      .where('subscriberId', '==', subscriberId)
+      .orderBy('createdAt', 'desc').get();
+    renderViewPayments(sub, snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  } catch (err) {
+    document.getElementById('vp_body').innerHTML =
+      `<div class="text-center text-red-400 py-8">تعذر التحميل: ${escapeHtml(err.message)}</div>`;
+  }
+}
+function closeViewPaymentsModal() {
+  document.getElementById('viewPaymentsModal').classList.remove('active');
+}
+
+function renderViewPayments(sub, payments) {
+  const totalUSD = sub.totalPriceUSD || sub.amountUSD || 0;
+  const paidUSD  = sub.paidAmountUSD || sub.amountUSD  || 0;
+  const remUSD   = sub.remainingAmountUSD || 0;
+  const pct = totalUSD > 0 ? Math.min(100, (paidUSD / totalUSD) * 100) : 100;
+  const canSeeRev = hasPermission('canViewRevenue');
+
+  let html = canSeeRev ? `
+    <div class="grid grid-cols-3 gap-3 mb-4 text-center text-xs">
+      <div class="bg-slate-50 rounded-lg p-3"><p class="text-slate-500 mb-1">السعر الكلي</p><p class="font-bold text-slate-800 text-base">$${formatNumber(totalUSD,2)}</p></div>
+      <div class="bg-emerald-50 rounded-lg p-3"><p class="text-emerald-600 mb-1">محصّل</p><p class="font-bold text-emerald-700 text-base">$${formatNumber(paidUSD,2)}</p></div>
+      <div class="bg-amber-50 rounded-lg p-3"><p class="text-amber-600 mb-1">متبقي</p><p class="font-bold text-amber-700 text-base">$${formatNumber(remUSD,2)}</p></div>
+    </div>
+    <div class="pay-bar mb-5"><div class="pay-bar-fill ${remUSD>0.01?'partial':''}" style="width:${pct}%"></div></div>` : '';
+
+  if (payments.length === 0) {
+    html += '<div class="text-center text-slate-400 py-6">لا توجد دفعات مسجلة لهذا المشترك</div>';
+  } else {
+    html += '<div class="space-y-2">';
+    payments.forEach(p => {
+      const receiptHtml = p.receiptUrl
+        ? (p.receiptType === 'image'
+            ? `<a href="${p.receiptUrl}" target="_blank" rel="noopener" class="text-indigo-600 text-xs hover:underline">🖼️ عرض الوصل</a>`
+            : `<a href="${p.receiptUrl}" target="_blank" rel="noopener" class="text-indigo-600 text-xs hover:underline">📄 عرض PDF</a>`)
+        : '';
+      html += `
+        <div class="border border-slate-200 rounded-lg p-3">
+          <div class="flex items-start justify-between gap-2 flex-wrap">
+            <div>
+              <p class="font-semibold text-slate-800">${formatNumber(p.amountOriginal,2)} ${escapeHtml(p.currencyOriginal||'')}</p>
+              <p class="text-xs text-slate-500 mt-0.5">${escapeHtml(p.paymentMethod||'')} · ${formatDate(p.date)}</p>
+              ${p.isInitialPayment ? '<span class="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded mt-1 inline-block">أولية</span>' : ''}
+              ${p.notes ? `<p class="text-xs text-slate-400 mt-1">${escapeHtml(p.notes)}</p>` : ''}
+            </div>
+            <div class="text-left shrink-0">
+              ${canSeeRev ? `<p class="font-bold text-emerald-700">$${formatNumber(p.amountUSD,2)}</p>` : ''}
+              ${receiptHtml}
+            </div>
+          </div>
+        </div>`;
+    });
+    html += '</div>';
+  }
+  document.getElementById('vp_body').innerHTML = html;
+}
+
+// ==================== الإحصائيات المتقدمة ====================
+function populateAdvancedStatsFilters() {
+  // Countries
+  const countryEl = document.getElementById('asFilterCountry');
+  if (!countryEl) return;
+  const countries = [...new Set(sampleData.map(s => s.residence || s.country).filter(Boolean))].sort();
+  const currentVal = countryEl.value;
+  countryEl.innerHTML = '<option value="">كل الدول</option>' +
+    countries.map(c => `<option value="${escapeAttr(c)}" ${c===currentVal?'selected':''}>${escapeHtml(getResidenceLabel(c))}</option>`).join('');
+
+  // Months
+  const monthEl = document.getElementById('asFilterMonth');
+  const months = [...new Set(sampleData.map(s => (s.date||'').slice(0,7)).filter(Boolean))].sort().reverse();
+  const curMonth = monthEl.value;
+  monthEl.innerHTML = '<option value="">كل الأشهر</option>' +
+    months.map(m => {
+      const [y,mo] = m.split('-');
+      return `<option value="${m}" ${m===curMonth?'selected':''}>${arabicMonths[Number(mo)-1]} ${y}</option>`;
+    }).join('');
+
+  // Payment methods
+  const pmEl = document.getElementById('asFilterPayment');
+  const methods = [...new Set(sampleData.map(s => s.payment).filter(Boolean))].sort();
+  const curPm = pmEl.value;
+  pmEl.innerHTML = '<option value="">كل طرق الدفع</option>' +
+    methods.map(m => `<option value="${escapeAttr(m)}" ${m===curPm?'selected':''}>${escapeHtml(m)}</option>`).join('');
+}
+
+function renderAdvancedStats() {
+  const pkg     = document.getElementById('asFilterPackage')?.value || '';
+  const country = document.getElementById('asFilterCountry')?.value || '';
+  const month   = document.getElementById('asFilterMonth')?.value   || '';
+  const emp     = document.getElementById('asFilterEmployee')?.value || '';
+  const pm      = document.getElementById('asFilterPayment')?.value  || '';
+
+  const filtered = sampleData.filter(s =>
+    (!pkg     || s.package === pkg) &&
+    (!country || (s.residence || s.country) === country) &&
+    (!month   || (s.date || '').slice(0,7) === month) &&
+    (!emp     || s.convincedBy === emp) &&
+    (!pm      || s.payment === pm)
+  );
+
+  const canRev = hasPermission('canViewRevenue');
+  const totalSubs  = filtered.length;
+  const totalRev   = filtered.reduce((a,s) => a + s.netAmountUSD,       0);
+  const totalPaid  = filtered.reduce((a,s) => a + s.paidAmountUSD,      0);
+  const totalRem   = filtered.reduce((a,s) => a + s.remainingAmountUSD, 0);
+
+  document.getElementById('asTotalSubs').textContent = formatNumber(totalSubs);
+  document.getElementById('asTotalRev').textContent  = canRev ? `$${formatNumber(totalRev,2)}`  : '—';
+  document.getElementById('asTotalPaid').textContent = canRev ? `$${formatNumber(totalPaid,2)}` : '—';
+  document.getElementById('asTotalRem').textContent  = canRev ? `$${formatNumber(totalRem,2)}`  : '—';
+
+  // By employee
+  const empColors = { 'حنان':'bg-purple-100 text-purple-700 bar-purple', 'ميار':'bg-teal-100 text-teal-700 bar-teal', 'ميدو':'bg-orange-100 text-orange-700 bar-orange' };
+  const empBarColors = { 'حنان':'#8b5cf6','ميار':'#14b8a6','ميدو':'#f97316' };
+  const empStats = ['حنان','ميار','ميدو'].map(e => {
+    const d = filtered.filter(s => s.convincedBy === e);
+    return { name: e, count: d.length, rev: d.reduce((a,x)=>a+x.netAmountUSD,0) };
+  }).sort((a,b) => b.rev - a.rev);
+  const maxRev = Math.max(...empStats.map(e=>e.rev), 1);
+  document.getElementById('asEmpBreakdown').innerHTML = empStats.map(e => `
+    <div class="mb-3">
+      <div class="flex items-center justify-between text-xs mb-1">
+        <span class="${(empColors[e.name]||'bg-slate-100 text-slate-700').split(' ').slice(0,2).join(' ')} px-2 py-0.5 rounded font-semibold">${e.name}</span>
+        <span class="text-slate-500">${e.count} مشترك${canRev ? ` · $${formatNumber(e.rev,2)}` : ''}</span>
+      </div>
+      <div class="bg-slate-100 rounded-full h-2 overflow-hidden">
+        <div class="h-full rounded-full" style="width:${e.rev/maxRev*100}%;background:${empBarColors[e.name]||'#6366f1'}"></div>
+      </div>
+    </div>`).join('');
+
+  // By payment method
+  const pmMap = {};
+  filtered.forEach(s => { if (s.payment) pmMap[s.payment] = (pmMap[s.payment]||0) + 1; });
+  const pmEntries = Object.entries(pmMap).sort((a,b)=>b[1]-a[1]);
+  const maxPm = Math.max(...pmEntries.map(([,c])=>c), 1);
+  document.getElementById('asPayBreakdown').innerHTML = pmEntries.length === 0
+    ? '<p class="text-slate-400 text-sm text-center py-4">لا توجد بيانات</p>'
+    : pmEntries.map(([m,c]) => `
+      <div class="mb-2">
+        <div class="flex items-center justify-between text-xs mb-1">
+          <span class="text-slate-600">${escapeHtml(m)}</span>
+          <span class="font-semibold text-slate-700">${c}</span>
+        </div>
+        <div class="bg-slate-100 rounded-full h-1.5 overflow-hidden">
+          <div class="h-full rounded-full bg-emerald-400" style="width:${c/maxPm*100}%"></div>
+        </div>
+      </div>`).join('');
+}
+
+function showLoginError(message) {
+  const box = document.getElementById('loginError');
+  box.textContent = message;
+  box.classList.remove('hidden');
+}
+
+async function logout() {
+  await auth?.signOut();
+}
+
+document.getElementById('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  document.getElementById('loginError').classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = 'جاري الدخول...';
+  try {
+    await auth.signInWithEmailAndPassword(
+      document.getElementById('loginEmail').value.trim(),
+      document.getElementById('loginPassword').value
+    );
+  } catch (error) {
+    showLoginError('فشل تسجيل الدخول: ' + error.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'دخول';
+  }
+});
+
+['searchInput','filterEmployee','filterStatus','filterPackage'].forEach(id => {
+  document.getElementById(id).addEventListener('input', applyFilters);
+  document.getElementById(id).addEventListener('change', applyFilters);
+});
+
+document.getElementById('todayDate').textContent = new Date().toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+populateCountrySelects();
+renderAll();
+initFirebase();
+
+async function deleteSubscriber(id, name) {
+  if (!hasPermission('canDelete')) return showNotice('ما عندك صلاحية للحذف', 'error');
+  if (!confirm(`متأكد بدك تحذف المشترك: ${name} ؟`)) return;
+  try {
+    await db.collection('subscribers').doc(id).delete();
+    await writeAuditLog('subscriber_deleted', {
+      targetType: 'subscriber', targetId: id, targetName: name,
+      summary: `تم حذف المشترك نهائياً: ${name}`
+    });
+    toast('تم حذف المشترك نهائياً');
+  } catch (error) {
+    showNotice('فشل الحذف: ' + error.message, 'error');
+  }
+}
+</script>
+</body>
+</html>

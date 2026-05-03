@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>سجل العمليات - نظام التغذية</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { font-family: 'Cairo', sans-serif; }
+  body { background: #f8fafc; }
+  .sidebar { background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%); }
+</style>
+</head>
+<body class="min-h-screen">
+<div id="loginScreen" class="fixed inset-0 z-[100] bg-slate-950 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-slate-900">تسجيل الدخول</h1>
+      <p class="text-sm text-slate-500 mt-1">سجل العمليات متاح للمالك فقط</p>
+    </div>
+    <form id="loginForm" class="space-y-4">
+      <label class="block text-sm font-medium text-slate-700">البريد الإلكتروني<input id="loginEmail" type="email" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" dir="ltr"></label>
+      <label class="block text-sm font-medium text-slate-700">كلمة المرور<input id="loginPassword" type="password" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" dir="ltr"></label>
+      <div id="loginError" class="hidden rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm p-3"></div>
+      <button id="loginBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg text-sm font-bold">دخول</button>
+    </form>
+  </div>
+</div>
+
+<div id="appRoot" class="hidden min-h-screen">
+  <aside class="sidebar hidden lg:flex fixed right-0 top-0 z-30 w-64 min-h-screen text-white flex-col">
+    <div class="p-6 border-b border-slate-700">
+      <h1 class="text-xl font-bold">نظام التغذية</h1>
+      <p class="text-xs text-slate-400 mt-1">سجل العمليات</p>
+      <p id="sideUserRole" class="text-xs text-indigo-200 mt-3"></p>
+    </div>
+    <nav class="flex-1 p-4 space-y-1 text-sm">
+      <a href="/index.html" class="block px-4 py-3 rounded-lg hover:bg-slate-700">لوحة المشتركين</a>
+      <a href="/users.html" class="block px-4 py-3 rounded-lg hover:bg-slate-700">إدارة المستخدمين</a>
+      <a href="/logs.html" class="block px-4 py-3 rounded-lg bg-indigo-500/20 border-r-4 border-indigo-400">سجل العمليات</a>
+    </nav>
+    <div class="p-4 border-t border-slate-700">
+      <button onclick="logout()" class="w-full bg-slate-700 hover:bg-slate-600 py-2 rounded-lg text-sm font-bold">خروج</button>
+    </div>
+  </aside>
+
+  <main class="lg:mr-64">
+    <header class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-20">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">سجل العمليات</h2>
+          <p class="text-sm text-slate-500 mt-1" id="currentUserLabel"></p>
+        </div>
+        <div class="flex items-center gap-2">
+          <select id="actionFilter" class="border border-slate-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">كل العمليات</option>
+            <option value="subscriber_created">إضافة مشترك</option>
+            <option value="subscriber_updated">تعديل مشترك</option>
+            <option value="subscriber_withdrawn">انسحاب مشترك</option>
+            <option value="user_updated">تعديل مستخدم</option>
+            <option value="user_permission_created">إضافة صلاحية</option>
+          </select>
+          <a href="/index.html" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold">رجوع للوحة</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="p-6">
+      <div id="notice" class="hidden rounded-xl border p-4 text-sm mb-4"></div>
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200">
+          <h3 class="text-lg font-bold text-slate-800">آخر 100 عملية</h3>
+          <p class="text-xs text-slate-500 mt-1">يتم تسجيل العمليات المهمة تلقائياً.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-slate-50 text-slate-600 text-xs">
+                <th class="text-right px-4 py-3">الوقت</th>
+                <th class="text-right px-4 py-3">العملية</th>
+                <th class="text-right px-4 py-3">من قام بها</th>
+                <th class="text-right px-4 py-3">الهدف</th>
+                <th class="text-right px-4 py-3">التفاصيل</th>
+              </tr>
+            </thead>
+            <tbody id="logsBody" class="divide-y divide-slate-100">
+              <tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDgLSqpUGXIuG9nTVknm1sPr0ngkThSaUA",
+  authDomain: "joker-52b38.firebaseapp.com",
+  projectId: "joker-52b38",
+  storageBucket: "joker-52b38.firebasestorage.app",
+  messagingSenderId: "182749321026",
+  appId: "1:182749321026:web:1e835fdf6fa52210e79adb",
+  measurementId: "G-C546FDS9NM"
+};
+
+let db = null;
+let auth = null;
+let unsubscribeLogs = null;
+let currentUserProfile = null;
+let logsData = [];
+
+const roleLabels = { owner: 'مالك', admin: 'مدير', employee: 'موظف' };
+const actionLabels = {
+  subscriber_created: 'إضافة مشترك',
+  subscriber_updated: 'تعديل مشترك',
+  subscriber_withdrawn: 'انسحاب مشترك',
+  user_updated: 'تعديل مستخدم',
+  user_permission_created: 'إضافة صلاحية'
+};
+
+firebase.initializeApp(firebaseConfig);
+db = firebase.firestore();
+auth = firebase.auth();
+auth.onAuthStateChanged(handleAuthState);
+
+async function handleAuthState(user) {
+  unsubscribeLogs?.();
+  logsData = [];
+  renderLogs();
+
+  if (!user) {
+    currentUserProfile = null;
+    document.getElementById('appRoot').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const doc = await db.collection('users').doc(user.uid).get();
+    if (!doc.exists || doc.data().active !== true || doc.data().role !== 'owner') {
+      await auth.signOut();
+      showLoginError('سجل العمليات متاح للمالك فقط.');
+      return;
+    }
+    currentUserProfile = { uid: user.uid, email: user.email, ...doc.data() };
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('appRoot').classList.remove('hidden');
+    const label = `${currentUserProfile.name || currentUserProfile.email} - ${roleLabels[currentUserProfile.role]}`;
+    document.getElementById('currentUserLabel').textContent = label;
+    document.getElementById('sideUserRole').textContent = label;
+    subscribeToLogs();
+  } catch (error) {
+    showLoginError('تعذر تحميل صلاحيات المستخدم: ' + error.message);
+    await auth.signOut();
+  }
+}
+
+function subscribeToLogs() {
+  unsubscribeLogs?.();
+  unsubscribeLogs = db.collection('auditLogs').orderBy('createdAt', 'desc').limit(100).onSnapshot(snapshot => {
+    logsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    renderLogs();
+  }, error => showNotice('تعذر تحميل سجل العمليات: ' + error.message, 'error'));
+}
+
+function renderLogs() {
+  const body = document.getElementById('logsBody');
+  if (!body) return;
+  const filter = document.getElementById('actionFilter')?.value || '';
+  const rows = logsData.filter(log => !filter || log.action === filter);
+  body.innerHTML = rows.map(log => `<tr class="hover:bg-slate-50">
+    <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">${formatDateTime(log.createdAt)}</td>
+    <td class="px-4 py-3"><span class="bg-indigo-50 text-indigo-700 px-2 py-1 rounded text-xs font-bold">${actionLabels[log.action] || log.action || '-'}</span></td>
+    <td class="px-4 py-3"><p class="font-medium text-slate-800">${escapeHtml(log.actorName || '-')}</p><p class="text-xs text-slate-400">${escapeHtml(log.actorRole || '')}</p></td>
+    <td class="px-4 py-3"><p class="text-slate-700">${escapeHtml(log.targetName || '-')}</p><p class="text-xs text-slate-400 font-mono" dir="ltr">${escapeHtml(log.targetId || '')}</p></td>
+    <td class="px-4 py-3 text-slate-600">${escapeHtml(log.summary || '')}</td>
+  </tr>`).join('') || '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">لا توجد عمليات</td></tr>';
+}
+
+document.getElementById('actionFilter').addEventListener('change', renderLogs);
+
+document.getElementById('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  document.getElementById('loginError').classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = 'جاري الدخول...';
+  try {
+    await auth.signInWithEmailAndPassword(
+      document.getElementById('loginEmail').value.trim(),
+      document.getElementById('loginPassword').value
+    );
+  } catch (error) {
+    showLoginError('فشل تسجيل الدخول: ' + error.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'دخول';
+  }
+});
+
+async function logout() {
+  await auth.signOut();
+}
+
+function showLoginError(message) {
+  const box = document.getElementById('loginError');
+  box.textContent = message;
+  box.classList.remove('hidden');
+}
+
+function showNotice(message, type = 'warn') {
+  const box = document.getElementById('notice');
+  box.className = `rounded-xl border p-4 text-sm ${type === 'error' ? 'border-red-200 bg-red-50 text-red-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`;
+  box.textContent = message;
+  box.classList.remove('hidden');
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function getMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  return new Date(value).getTime() || 0;
+}
+
+function formatDateTime(value) {
+  const date = typeof value?.toDate === 'function' ? value.toDate() : new Date(getMillis(value));
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('ar-EG', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+</script>
+</body>
+</html>

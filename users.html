@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>إدارة المستخدمين - نظام التغذية</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { font-family: 'Cairo', sans-serif; }
+  body { background: #f8fafc; }
+  .sidebar { background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%); }
+  .modal-overlay { background: rgba(0,0,0,.5); position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: 1rem; }
+  .modal-overlay.active { display: flex; }
+</style>
+</head>
+<body class="min-h-screen">
+<div id="loginScreen" class="fixed inset-0 z-[100] bg-slate-950 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-slate-900">تسجيل الدخول</h1>
+      <p class="text-sm text-slate-500 mt-1">هذه الصفحة متاحة للمالك فقط</p>
+    </div>
+    <form id="loginForm" class="space-y-4">
+      <label class="block text-sm font-medium text-slate-700">البريد الإلكتروني<input id="loginEmail" type="email" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" dir="ltr"></label>
+      <label class="block text-sm font-medium text-slate-700">كلمة المرور<input id="loginPassword" type="password" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" dir="ltr"></label>
+      <div id="loginError" class="hidden rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm p-3"></div>
+      <button id="loginBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg text-sm font-bold">دخول</button>
+    </form>
+  </div>
+</div>
+
+<div id="appRoot" class="hidden min-h-screen">
+  <aside class="sidebar hidden lg:flex fixed right-0 top-0 z-30 w-64 min-h-screen text-white flex-col">
+    <div class="p-6 border-b border-slate-700">
+      <h1 class="text-xl font-bold">نظام التغذية</h1>
+      <p class="text-xs text-slate-400 mt-1">إدارة المستخدمين</p>
+      <p id="sideUserRole" class="text-xs text-indigo-200 mt-3"></p>
+    </div>
+    <nav class="flex-1 p-4 space-y-1 text-sm">
+      <a href="/index.html" class="block px-4 py-3 rounded-lg hover:bg-slate-700">لوحة المشتركين</a>
+      <a href="/users.html" class="block px-4 py-3 rounded-lg bg-indigo-500/20 border-r-4 border-indigo-400">إدارة المستخدمين</a>
+      <a href="/logs.html" class="block px-4 py-3 rounded-lg hover:bg-slate-700">سجل العمليات</a>
+    </nav>
+    <div class="p-4 border-t border-slate-700">
+      <button onclick="logout()" class="w-full bg-slate-700 hover:bg-slate-600 py-2 rounded-lg text-sm font-bold">خروج</button>
+    </div>
+  </aside>
+
+  <main class="lg:mr-64">
+    <header class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-20">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">إدارة المستخدمين</h2>
+          <p class="text-sm text-slate-500 mt-1" id="currentUserLabel"></p>
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="/index.html" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold">رجوع للوحة</a>
+          <button onclick="logout()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold">خروج</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="p-6 space-y-6">
+      <div id="notice" class="hidden rounded-xl border p-4 text-sm"></div>
+
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">صلاحيات الفريق</h3>
+            <p class="text-xs text-slate-500 mt-1">أنشئ حساب الإيميل من Firebase Authentication، ثم أضف أو عدّل صلاحياته هنا.</p>
+          </div>
+          <button onclick="openAddUserDocModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold">إضافة صلاحية UID</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-slate-50 text-slate-600 text-xs">
+                <th class="text-right px-4 py-3">المستخدم</th>
+                <th class="text-right px-4 py-3">الدور</th>
+                <th class="text-right px-4 py-3">اسم الموظف</th>
+                <th class="text-right px-4 py-3">الحالة</th>
+                <th class="text-right px-4 py-3">آخر تحديث</th>
+                <th class="text-right px-4 py-3">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="usersBody" class="divide-y divide-slate-100">
+              <tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="addUserDocModal" class="modal-overlay">
+  <div class="bg-white rounded-2xl max-w-lg w-full p-6">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-xl font-bold text-slate-800">إضافة صلاحية مستخدم</h3>
+        <p class="text-xs text-slate-500 mt-1">الصق UID من Firebase Authentication</p>
+      </div>
+      <button onclick="closeAddUserDocModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+    </div>
+    <form id="addUserDocForm" class="space-y-4">
+      <label class="block text-sm font-medium text-slate-700">User UID<input id="new_uid" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" dir="ltr"></label>
+      <label class="block text-sm font-medium text-slate-700">الاسم<input id="new_name" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></label>
+      <label class="block text-sm font-medium text-slate-700">الدور<select id="new_role" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"><option value="employee">موظف</option><option value="admin">مدير</option><option value="owner">مالك</option></select></label>
+      <label class="block text-sm font-medium text-slate-700">اسم الموظف<input id="new_employee" required class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="مثال: حنان"></label>
+      <label class="inline-flex items-center gap-2 text-sm text-slate-700"><input id="new_active" type="checkbox" checked> فعّال</label>
+      <div class="flex gap-2 pt-2">
+        <button class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-sm font-bold">حفظ</button>
+        <button type="button" onclick="closeAddUserDocModal()" class="px-4 py-2.5 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">إلغاء</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDgLSqpUGXIuG9nTVknm1sPr0ngkThSaUA",
+  authDomain: "joker-52b38.firebaseapp.com",
+  projectId: "joker-52b38",
+  storageBucket: "joker-52b38.firebasestorage.app",
+  messagingSenderId: "182749321026",
+  appId: "1:182749321026:web:1e835fdf6fa52210e79adb",
+  measurementId: "G-C546FDS9NM"
+};
+
+let db = null;
+let auth = null;
+let unsubscribeUsers = null;
+let currentUserProfile = null;
+let usersData = [];
+
+const roleLabels = { owner: 'مالك', admin: 'مدير', employee: 'موظف' };
+
+firebase.initializeApp(firebaseConfig);
+db = firebase.firestore();
+auth = firebase.auth();
+auth.onAuthStateChanged(handleAuthState);
+
+async function handleAuthState(user) {
+  unsubscribeUsers?.();
+  usersData = [];
+  renderUsers();
+
+  if (!user) {
+    currentUserProfile = null;
+    document.getElementById('appRoot').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const doc = await db.collection('users').doc(user.uid).get();
+    if (!doc.exists || doc.data().active !== true || doc.data().role !== 'owner') {
+      await auth.signOut();
+      showLoginError('هذه الصفحة متاحة للمالك فقط.');
+      return;
+    }
+    currentUserProfile = { uid: user.uid, email: user.email, ...doc.data() };
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('appRoot').classList.remove('hidden');
+    const label = `${currentUserProfile.name || currentUserProfile.email} - ${roleLabels[currentUserProfile.role]}`;
+    document.getElementById('currentUserLabel').textContent = label;
+    document.getElementById('sideUserRole').textContent = label;
+    subscribeToUsers();
+  } catch (error) {
+    showLoginError('تعذر تحميل صلاحيات المستخدم: ' + error.message);
+    await auth.signOut();
+  }
+}
+
+function subscribeToUsers() {
+  unsubscribeUsers?.();
+  unsubscribeUsers = db.collection('users').onSnapshot(snapshot => {
+    usersData = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ar'));
+    renderUsers();
+  }, error => showNotice('تعذر تحميل المستخدمين: ' + error.message, 'error'));
+}
+
+function renderUsers() {
+  const body = document.getElementById('usersBody');
+  if (!body) return;
+  body.innerHTML = usersData.map(user => {
+    const isCurrentUser = user.uid === currentUserProfile?.uid;
+    const roleOptions = ['owner', 'admin', 'employee'].map(role =>
+      `<option value="${role}" ${user.role === role ? 'selected' : ''}>${roleLabels[role]}</option>`
+    ).join('');
+    const updated = user.updatedAt ? formatDateTime(user.updatedAt) : '-';
+    return `<tr class="hover:bg-slate-50">
+      <td class="px-4 py-3 min-w-[260px]">
+        <input id="user_name_${user.uid}" value="${escapeAttr(user.name || '')}" class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm mb-1" placeholder="الاسم">
+        <p class="text-xs text-slate-400 font-mono" dir="ltr">${escapeHtml(user.uid)}</p>
+        ${user.email ? `<p class="text-xs text-slate-500" dir="ltr">${escapeHtml(user.email)}</p>` : ''}
+      </td>
+      <td class="px-4 py-3"><select id="user_role_${user.uid}" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" ${isCurrentUser ? 'disabled' : ''}>${roleOptions}</select></td>
+      <td class="px-4 py-3"><input id="user_employee_${user.uid}" value="${escapeAttr(user.employeeName || '')}" class="w-40 border border-slate-300 rounded-lg px-3 py-1.5 text-sm" placeholder="مثال: حنان"></td>
+      <td class="px-4 py-3"><label class="inline-flex items-center gap-2 text-sm text-slate-700"><input id="user_active_${user.uid}" type="checkbox" ${user.active ? 'checked' : ''} ${isCurrentUser ? 'disabled' : ''}> فعّال</label></td>
+      <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">${updated}</td>
+      <td class="px-4 py-3"><button onclick="saveUserProfile('${user.uid}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">حفظ</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">لا توجد بيانات مستخدمين</td></tr>';
+}
+
+async function saveUserProfile(uid) {
+  const existing = usersData.find(u => u.uid === uid);
+  if (!existing) return;
+  const isCurrentUser = uid === currentUserProfile?.uid;
+  const payload = {
+    name: document.getElementById('user_name_' + uid).value.trim(),
+    employeeName: document.getElementById('user_employee_' + uid).value.trim(),
+    updatedBy: currentUserProfile.uid,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+  };
+  if (!isCurrentUser) {
+    payload.role = document.getElementById('user_role_' + uid).value;
+    payload.active = document.getElementById('user_active_' + uid).checked;
+  }
+  try {
+    await db.collection('users').doc(uid).update(payload);
+    await writeAuditLog('user_updated', {
+      targetType: 'user',
+      targetId: uid,
+      targetName: payload.name,
+      summary: `تم تعديل صلاحيات المستخدم: ${payload.name || uid}`,
+      metadata: {
+        role: payload.role || existing.role,
+        active: typeof payload.active === 'boolean' ? payload.active : existing.active,
+        employeeName: payload.employeeName
+      }
+    });
+    toast('تم حفظ بيانات المستخدم');
+  } catch (error) {
+    showNotice('فشل حفظ المستخدم: ' + error.message, 'error');
+  }
+}
+
+function openAddUserDocModal() {
+  document.getElementById('addUserDocForm').reset();
+  document.getElementById('new_active').checked = true;
+  document.getElementById('addUserDocModal').classList.add('active');
+}
+
+function closeAddUserDocModal() {
+  document.getElementById('addUserDocModal').classList.remove('active');
+}
+
+document.getElementById('addUserDocForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const uid = document.getElementById('new_uid').value.trim();
+  try {
+    await db.collection('users').doc(uid).set({
+      name: document.getElementById('new_name').value.trim(),
+      role: document.getElementById('new_role').value,
+      employeeName: document.getElementById('new_employee').value.trim(),
+      active: document.getElementById('new_active').checked,
+      createdBy: currentUserProfile.uid,
+      updatedBy: currentUserProfile.uid,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    await writeAuditLog('user_permission_created', {
+      targetType: 'user',
+      targetId: uid,
+      targetName: document.getElementById('new_name').value.trim(),
+      summary: `تمت إضافة صلاحية مستخدم: ${document.getElementById('new_name').value.trim()}`
+    });
+    closeAddUserDocModal();
+    toast('تمت إضافة صلاحية المستخدم');
+  } catch (error) {
+    showNotice('فشل إضافة المستخدم: ' + error.message, 'error');
+  }
+});
+
+document.getElementById('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  document.getElementById('loginError').classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = 'جاري الدخول...';
+  try {
+    await auth.signInWithEmailAndPassword(
+      document.getElementById('loginEmail').value.trim(),
+      document.getElementById('loginPassword').value
+    );
+  } catch (error) {
+    showLoginError('فشل تسجيل الدخول: ' + error.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'دخول';
+  }
+});
+
+async function logout() {
+  await auth.signOut();
+}
+
+function showLoginError(message) {
+  const box = document.getElementById('loginError');
+  box.textContent = message;
+  box.classList.remove('hidden');
+}
+
+function showNotice(message, type = 'warn') {
+  const box = document.getElementById('notice');
+  box.className = `rounded-xl border p-4 text-sm ${type === 'error' ? 'border-red-200 bg-red-50 text-red-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`;
+  box.textContent = message;
+  box.classList.remove('hidden');
+}
+
+function toast(message) {
+  const el = document.createElement('div');
+  el.className = 'fixed top-4 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 text-sm font-bold';
+  el.textContent = message;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+async function writeAuditLog(action, details = {}) {
+  if (!db || !currentUserProfile) return;
+  try {
+    await db.collection('auditLogs').add({
+      action,
+      actorUid: currentUserProfile.uid,
+      actorName: currentUserProfile.name || currentUserProfile.email || '',
+      actorRole: currentUserProfile.role || '',
+      ...details,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    console.warn('audit log failed', error);
+  }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/`/g, '&#96;');
+}
+
+function getMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  return new Date(value).getTime() || 0;
+}
+
+function formatDateTime(value) {
+  const date = typeof value?.toDate === 'function' ? value.toDate() : new Date(getMillis(value));
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('ar-EG', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+</script>
+</body>
+</html>
