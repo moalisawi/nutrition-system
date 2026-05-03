@@ -1,0 +1,31 @@
+* { font-family: 'Cairo', sans-serif; }
+body { background: #f8fafc; }
+.sidebar { background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%); }
+.card { transition: all .2s; }
+.card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+.modal-overlay { background: rgba(0,0,0,.5); position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: 1rem; }
+.modal-overlay.active { display: flex; }
+.status-active { background: #dcfce7; color: #166534; }
+.status-expiring { background: #fef3c7; color: #92400e; }
+.status-expired { background: #fee2e2; color: #991b1b; }
+.status-withdrawn { background: #e2e8f0; color: #334155; }
+.pkg-silver { background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%); color: #334155; border: 1px solid #94a3b8; }
+.pkg-gold { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); color: #78350f; border: 1px solid #d97706; }
+.badge-emp-hanan { background: #ede9fe; color: #5b21b6; }
+.badge-emp-mayar { background: #ccfbf1; color: #115e59; }
+.badge-emp-medo { background: #fed7aa; color: #9a3412; }
+thead th { position: sticky; top: 0; background: #f8fafc; z-index: 10; }
+.calendar-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 8px; font-size: 12px; transition: all 0.15s; cursor: default; position: relative; padding: 4px; }
+.calendar-day.has-data { background: #eef2ff; border: 1px solid #c7d2fe; cursor: pointer; }
+.calendar-day.has-data:hover { background: #c7d2fe; transform: scale(1.05); }
+.calendar-day.empty { background: #f8fafc; border: 1px dashed #e2e8f0; color: #94a3b8; }
+.calendar-day.today { box-shadow: 0 0 0 2px #6366f1; }
+.calendar-day .day-num { font-weight: 600; font-size: 13px; }
+.calendar-day .day-count { font-size: 10px; color: #4f46e5; font-weight: 700; }
+.day-popup { position: absolute; bottom: 100%; right: 50%; transform: translateX(50%); background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; min-width: 180px; z-index: 30; box-shadow: 0 10px 25px rgba(0,0,0,0.1); display: none; font-size: 11px; text-align: right; }
+.calendar-day:hover .day-popup { display: block; }
+.pay-bar { height: 5px; border-radius: 3px; background: #e2e8f0; overflow: hidden; margin-top: 3px; min-width: 60px; }
+.pay-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; background: #10b981; }
+.pay-bar-fill.partial { background: #f59e0b; }
+.file-drop-zone { border: 2px dashed #cbd5e1; border-radius: 8px; padding: 14px; text-align: center; cursor: pointer; transition: all .2s; }
+.file-drop-zone:hover { border-color: #6366f1; background: #eef2ff; }
