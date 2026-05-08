@@ -4,8 +4,10 @@ let auth = null;
 let storage = null;
 let unsubscribeSubscribers = null;
 let unsubscribeUsers = null;
+let unsubscribeRefunds = null;
 let sampleData = [];
 let usersData = [];
+let refundsData = [];
 let currentUserProfile = null;
 let currentExchangeRates = { USD: 1, EGP: 47.5, JOD: 0.71, ILS: 3.65 };
 let currentMonth = new Date();
@@ -85,8 +87,10 @@ function initFirebase() {
 async function handleAuthState(user) {
   unsubscribeSubscribers?.();
   unsubscribeUsers?.();
+  unsubscribeRefunds?.();
   sampleData = [];
   usersData = [];
+  refundsData = [];
   renderAll();
   renderUsersAdmin();
 
@@ -109,6 +113,7 @@ async function handleAuthState(user) {
     document.getElementById('appRoot').classList.remove('hidden');
     applyRoleUi();
     subscribeToSubscribers();
+    subscribeToRefunds();
   } catch (error) {
     showLoginError('تعذر تحميل صلاحيات المستخدم: ' + error.message);
     await auth.signOut();
@@ -126,6 +131,29 @@ function subscribeToSubscribers() {
     sampleData.sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
     renderAll();
   }, error => showNotice('تعذر تحميل بيانات المشتركين من Firebase: ' + error.message, 'error'));
+}
+
+function subscribeToRefunds() {
+  unsubscribeRefunds?.();
+  if (!hasPermission('canViewAll') && !hasPermission('canViewRevenue')) return;
+  unsubscribeRefunds = db.collection('refunds').orderBy('createdAt', 'desc').onSnapshot(snapshot => {
+    refundsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    renderAll();
+  }, error => console.warn('refunds listener error', error));
+}
+
+function getRefundsForSubscriber(subscriberId) {
+  return refundsData.filter(r => r.subscriberId === subscriberId);
+}
+
+function getTotalRefundedUSD(subscriberId) {
+  const fromCollection = refundsData
+    .filter(r => r.subscriberId === subscriberId)
+    .reduce((sum, r) => sum + (r.refundAmountUSD || 0), 0);
+  if (fromCollection > 0) return fromCollection;
+  // Fallback: legacy refundAmountUSD stored directly on subscriber
+  const sub = sampleData.find(s => s.id === subscriberId);
+  return sub?.refundAmountUSD || 0;
 }
 
 function subscribeToUsers(force = false) {

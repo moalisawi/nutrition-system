@@ -52,6 +52,22 @@ service cloud.firestore {
       allow create, update, delete: if isOwner();
     }
 
+    match /payments/{paymentId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if isOwner();
+    }
+
+    match /refunds/{refundId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if isOwner();
+    }
+
     match /auditLogs/{logId} {
       allow read: if isOwner();
       allow create: if activeUser()

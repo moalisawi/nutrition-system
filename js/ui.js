@@ -79,10 +79,12 @@ function normalizeSubscriber(s) {
     s.remainingAmountUSD !== undefined ? s.remainingAmountUSD
     : Math.max(0, totalPriceUSD - paidAmountUSD)
   );
+  // Legacy refund fields kept for backward compatibility; new refunds use refunds collection
   const refundAmount    = Number(s.refundAmount    || 0);
   const refundRate      = Number(s.refundRate      || 1);
   const refundAmountUSD = Number(s.refundAmountUSD || (refundAmount / refundRate));
-  const netAmountUSD    = Math.max(0, Number(s.netAmountUSD ?? (paidAmountUSD - refundAmountUSD)));
+  // netAmountUSD = paidAmountUSD (refunds tracked independently via refunds collection)
+  const netAmountUSD    = Number(s.netAmountUSD ?? paidAmountUSD);
   const normalized = {
     ...s, lockedRate, amount, amountUSD,
     totalPrice, totalPriceUSD, paidAmount, paidAmountUSD, remainingAmountUSD,
@@ -101,9 +103,16 @@ function renderCalendar() {
     const d = new Date(s.date);
     return d.getFullYear() === year && d.getMonth() === month;
   });
+  // Transaction-based: revenue from payments in this month, minus refunds in this month
+  const monthPaymentsRev = monthData.reduce((s, x) => s + (x.paidAmountUSD || x.amountUSD || 0), 0);
+  const monthRefundsRev  = refundsData
+    .filter(r => { const d = new Date(r.refundDate); return d.getFullYear() === year && d.getMonth() === month; })
+    .reduce((s, r) => s + (r.refundAmountUSD || 0), 0);
+  const monthNetRevenue  = monthPaymentsRev - monthRefundsRev;
+
   document.getElementById('monthTotal').textContent   = formatNumber(monthData.length);
   document.getElementById('monthRevenue').textContent = hasPermission('canViewRevenue')
-    ? formatNumber(monthData.reduce((s, x) => s + x.netAmountUSD, 0), 2) : 'مخفي';
+    ? formatNumber(monthNetRevenue, 2) : 'مخفي';
   document.getElementById('monthSilver').textContent  = formatNumber(monthData.filter(s => s.package === 'فضية').length);
   document.getElementById('monthGold').textContent    = formatNumber(monthData.filter(s => s.package === 'ذهبية').length);
   const firstDay    = new Date(year, month, 1);
@@ -181,9 +190,12 @@ function updateStats(data) {
   const total           = data.length;
   const withdrawn       = data.filter(s => s.subscriptionState === 'withdrawn').length;
   const activeForExpiry = data.filter(s => s.subscriptionState !== 'withdrawn');
-  const grossUSD        = data.reduce((sum, s) => sum + s.amountUSD, 0);
-  const refundUSD       = data.reduce((sum, s) => sum + s.refundAmountUSD, 0);
-  const netUSD          = data.reduce((sum, s) => sum + s.netAmountUSD, 0);
+  const grossUSD        = data.reduce((sum, s) => sum + (s.paidAmountUSD || s.amountUSD || 0), 0);
+  // Use refunds collection for totals; fallback to legacy subscriber fields
+  const refundUSD       = refundsData.length > 0
+    ? refundsData.reduce((sum, r) => sum + (r.refundAmountUSD || 0), 0)
+    : data.reduce((sum, s) => sum + (s.refundAmountUSD || 0), 0);
+  const netUSD          = grossUSD - refundUSD;
   const expiring        = activeForExpiry.filter(s => s.status === 'ينتهي قريباً').length;
   const silver          = data.filter(s => s.package === 'فضية');
   const gold            = data.filter(s => s.package === 'ذهبية');
@@ -241,8 +253,11 @@ function updateTable(data) {
     const statusClass = s.status === 'نشط' ? 'status-active' : s.status === 'ينتهي قريباً' ? 'status-expiring' : s.status === 'منسحب' ? 'status-withdrawn' : 'status-expired';
     const empClass    = s.convincedBy === 'حنان' ? 'badge-emp-hanan' : s.convincedBy === 'ميار' ? 'badge-emp-mayar' : 'badge-emp-medo';
     const pkgClass    = s.package === 'فضية' ? 'pkg-silver' : 'pkg-gold';
-    const refundText  = hasPermission('canViewRevenue') && s.refundAmountUSD > 0 ? `$${formatNumber(s.refundAmountUSD, 2)}` : '-';
-    const netText     = hasPermission('canViewRevenue') ? `$${formatNumber(s.netAmountUSD, 2)}` : 'مخفي';
+    // Use refunds collection for display; fallback to legacy subscriber field
+    const subRefundUSD = typeof getTotalRefundedUSD === 'function' ? getTotalRefundedUSD(s.id) : s.refundAmountUSD;
+    const refundText   = hasPermission('canViewRevenue') && subRefundUSD > 0 ? `$${formatNumber(subRefundUSD, 2)}` : '-';
+    const realNetUSD   = (s.paidAmountUSD || s.amountUSD || 0) - subRefundUSD;
+    const netText      = hasPermission('canViewRevenue') ? `$${formatNumber(realNetUSD, 2)}` : 'مخفي';
     const totalText   = hasPermission('canViewRevenue') ? `$${formatNumber(s.totalPriceUSD, 2)}` : 'مخفي';
 
     let payCell = 'مخفي';
@@ -458,9 +473,104 @@ function renderAdvancedStats() {
       </div>`).join('');
 }
 
+// ==================== Transaction-Based Analytics ====================
+function updateTransactionCards() {
+  if (!hasPermission('canViewRevenue')) return;
+
+  const now       = new Date();
+  const curYear   = now.getFullYear();
+  const curMonth  = now.getMonth();
+  const monthKey  = `${curYear}-${String(curMonth + 1).padStart(2, '0')}`;
+
+  // Monthly refunds from refunds collection (by refundDate)
+  const monthRefunds = refundsData.filter(r => (r.refundDate || '').slice(0, 7) === monthKey);
+  const monthRefundsTotal = monthRefunds.reduce((sum, r) => sum + (r.refundAmountUSD || 0), 0);
+
+  // Monthly withdrawn subscribers
+  const monthWithdrawn = sampleData.filter(s =>
+    s.subscriptionState === 'withdrawn' && (s.withdrawnAt || '').slice(0, 7) === monthKey
+  ).length;
+
+  // Real net profit: payments this month minus refunds this month (transaction-based)
+  // We use subscriber payment dates from payments collection if available,
+  // otherwise fall back to subscriber.date for legacy data
+  const monthPaymentsTotal = sampleData
+    .filter(s => (s.date || '').slice(0, 7) === monthKey)
+    .reduce((sum, s) => sum + (s.paidAmountUSD || s.amountUSD || 0), 0);
+
+  const realNetProfit = monthPaymentsTotal - monthRefundsTotal;
+
+  const el = id => document.getElementById(id);
+  if (el('monthlyRefundsTotal'))  el('monthlyRefundsTotal').textContent  = formatNumber(monthRefundsTotal, 2);
+  if (el('monthlyWithdrawnCount')) el('monthlyWithdrawnCount').textContent = formatNumber(monthWithdrawn);
+  if (el('realNetProfit'))        el('realNetProfit').textContent        = formatNumber(realNetProfit, 2);
+}
+
+function renderRefundsChart() {
+  const container = document.getElementById('refundsChartContainer');
+  if (!container || !hasPermission('canViewRevenue')) return;
+
+  // Collect last 6 months
+  const months = [];
+  const now = new Date();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push({
+      key:   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      label: `${arabicMonths[d.getMonth()]} ${d.getFullYear()}`
+    });
+  }
+
+  const chartData = months.map(m => {
+    // Revenue: sum of paidAmountUSD for subscribers with date in this month
+    const revenue = sampleData
+      .filter(s => (s.date || '').slice(0, 7) === m.key)
+      .reduce((sum, s) => sum + (s.paidAmountUSD || s.amountUSD || 0), 0);
+
+    // Refunds: sum from refunds collection by refundDate
+    const refunds = refundsData
+      .filter(r => (r.refundDate || '').slice(0, 7) === m.key)
+      .reduce((sum, r) => sum + (r.refundAmountUSD || 0), 0);
+
+    return { ...m, revenue, refunds, net: revenue - refunds };
+  });
+
+  const maxVal = Math.max(...chartData.map(d => Math.max(d.revenue, d.refunds)), 1);
+
+  container.innerHTML = chartData.map(d => {
+    const revPct = (d.revenue / maxVal) * 100;
+    const refPct = (d.refunds / maxVal) * 100;
+    return `
+      <div class="border border-slate-100 rounded-lg p-3">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-slate-700">${d.label}</span>
+          <span class="text-xs font-bold ${d.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}">صافي: $${formatNumber(d.net, 2)}</span>
+        </div>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-emerald-600 w-16 shrink-0">إيراد</span>
+            <div class="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden">
+              <div class="bg-emerald-500 h-full rounded-full" style="width:${revPct}%"></div>
+            </div>
+            <span class="text-xs text-slate-600 w-20 text-left">$${formatNumber(d.revenue, 2)}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-rose-600 w-16 shrink-0">استرداد</span>
+            <div class="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden">
+              <div class="bg-rose-500 h-full rounded-full" style="width:${refPct}%"></div>
+            </div>
+            <span class="text-xs text-slate-600 w-20 text-left">$${formatNumber(d.refunds, 2)}</span>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
 // ==================== Master Render ====================
 function renderAll() {
   updateStats(sampleData);
+  updateTransactionCards();
+  renderRefundsChart();
   updateTeamPerformance(sampleData);
   updateAlerts(sampleData);
   applyFilters();
