@@ -90,7 +90,8 @@ document.getElementById('addPaymentForm').addEventListener('submit', async e => 
       const newPaidUSD  = (d.paidAmountUSD ?? d.amountUSD ?? 0) + amountUSD;
       const totalUSD    = d.totalPriceUSD  ?? d.amountUSD ?? 0;
       const newRemUSD   = Math.max(0, totalUSD - newPaidUSD);
-      const newNetUSD   = Math.max(0, newPaidUSD - (d.refundAmountUSD || 0));
+      // netAmountUSD = paidAmountUSD (refunds tracked independently in refunds collection)
+      const newNetUSD   = newPaidUSD;
       const newPaidOrig = (d.paidAmount ?? d.amount ?? 0) + amountOrig;
 
       tx.set(paymentRef, {

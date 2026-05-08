@@ -47,8 +47,10 @@ function openEditModal(id) {
   toggleReferrerField();
   updateDialCode();
   const info = document.getElementById('editStateInfo');
+  const editRefunded = getTotalRefundedUSD(id);
+  const editNetUSD   = (s.paidAmountUSD || s.amountUSD || 0) - editRefunded;
   info.textContent = s.subscriptionState === 'withdrawn'
-    ? `هذا المشترك منسحب. المسترد: $${formatNumber(s.refundAmountUSD, 2)}، الصافي: $${formatNumber(s.netAmountUSD, 2)}`
+    ? `هذا المشترك منسحب. المسترد: $${formatNumber(editRefunded, 2)}، الصافي: $${formatNumber(editNetUSD, 2)}`
     : 'هذا التعديل يغير بيانات المشترك ولا يغير حالة الانسحاب.';
   info.classList.remove('hidden');
   document.getElementById('subscriberModal').classList.add('active');
@@ -74,7 +76,6 @@ document.getElementById('subscriberForm').addEventListener('submit', async e => 
     const totalPrice   = Number(document.getElementById('f_totalPrice').value);
     const totalPriceUSD = totalPrice / lockedRate;
     const old = id ? sampleData.find(s => s.id === id) : null;
-    const refundAmountUSD = old?.refundAmountUSD || 0;
     const convincedBy = currentUserProfile.role === 'employee'
       ? (currentUserProfile.employeeName || currentUserProfile.name || '')
       : document.getElementById('f_convinced').value;
@@ -102,7 +103,8 @@ document.getElementById('subscriberForm').addEventListener('submit', async e => 
       remainingAmountUSD = Math.max(0, totalPriceUSD - paidAmountUSD);
       remainingAmount    = Math.max(0, totalPrice     - paidAmount);
     }
-    const netAmountUSD = Math.max(0, paidAmountUSD - refundAmountUSD);
+    // netAmountUSD is now paidAmountUSD only; refunds tracked independently in refunds collection
+    const netAmountUSD = paidAmountUSD;
 
     const payload = {
       date,
@@ -191,11 +193,49 @@ function openWithdrawModal(id) {
   if (!s) return;
   document.getElementById('withdrawForm').reset();
   document.getElementById('withdrawId').value        = id;
-  document.getElementById('withdrawSubName').textContent = `${s.name} - المدفوع $${formatNumber(s.amountUSD, 2)}`;
+  document.getElementById('withdrawSubName').textContent = s.name;
   document.getElementById('w_date').value            = s.withdrawnAt || new Date().toISOString().split('T')[0];
   document.getElementById('w_reason').value          = s.withdrawalReason || '';
-  document.getElementById('w_refundAmount').value    = s.refundAmount || 0;
-  document.getElementById('w_refundCurrency').value  = s.refundCurrency || s.currency || 'USD';
+  document.getElementById('w_refundAmount').value    = 0;
+  document.getElementById('w_refundCurrency').value  = s.currencyOriginal || s.currency || 'USD';
+
+  // Financial summary
+  const totalUSD        = s.totalPriceUSD || s.amountUSD || 0;
+  const paidUSD         = s.paidAmountUSD || s.amountUSD || 0;
+  const prevRefundedUSD = getTotalRefundedUSD(id);
+  const remainingUSD    = s.remainingAmountUSD || 0;
+  const currentNetUSD   = paidUSD - prevRefundedUSD;
+
+  const summaryEl = document.getElementById('w_financialSummary');
+  if (summaryEl && hasPermission('canViewRevenue')) {
+    summaryEl.innerHTML = `
+      <div class="grid grid-cols-2 gap-2 text-center text-xs">
+        <div class="bg-slate-50 rounded p-2">
+          <p class="text-slate-500">السعر الكلي</p>
+          <p class="font-bold text-slate-800">$${formatNumber(totalUSD, 2)}</p>
+        </div>
+        <div class="bg-emerald-50 rounded p-2">
+          <p class="text-emerald-600">المدفوع</p>
+          <p class="font-bold text-emerald-700">$${formatNumber(paidUSD, 2)}</p>
+        </div>
+        <div class="bg-rose-50 rounded p-2">
+          <p class="text-rose-600">مسترد سابقا</p>
+          <p class="font-bold text-rose-700">$${formatNumber(prevRefundedUSD, 2)}</p>
+        </div>
+        <div class="bg-amber-50 rounded p-2">
+          <p class="text-amber-600">أقساط متبقية</p>
+          <p class="font-bold text-amber-700">$${formatNumber(remainingUSD, 2)}</p>
+        </div>
+      </div>
+      <div class="mt-2 bg-indigo-50 rounded p-2 text-center">
+        <p class="text-xs text-indigo-600">صافي الإيراد الحالي</p>
+        <p class="text-lg font-bold text-indigo-800">$${formatNumber(currentNetUSD, 2)}</p>
+      </div>`;
+    summaryEl.classList.remove('hidden');
+  } else if (summaryEl) {
+    summaryEl.classList.add('hidden');
+  }
+
   document.getElementById('withdrawModal').classList.add('active');
 }
 
@@ -216,20 +256,61 @@ document.getElementById('withdrawForm').addEventListener('submit', async e => {
     const refundAmount     = Number(document.getElementById('w_refundAmount').value || 0);
     const refundRate       = currentExchangeRates[refundCurrency] || 1;
     const refundAmountUSD  = refundAmount / refundRate;
-    await db.collection('subscribers').doc(id).update({
+    const withdrawDate     = document.getElementById('w_date').value;
+    const withdrawReason   = document.getElementById('w_reason').value.trim();
+
+    // Validate: total refunded should not exceed paid
+    const previouslyRefunded = getTotalRefundedUSD(id);
+    if (refundAmountUSD > 0 && (previouslyRefunded + refundAmountUSD) > (s.paidAmountUSD + 0.01)) {
+      if (!confirm(`تنبيه: إجمالي الاسترداد ($${formatNumber(previouslyRefunded + refundAmountUSD, 2)}) سيتجاوز المبلغ المدفوع ($${formatNumber(s.paidAmountUSD, 2)}). هل تريد المتابعة؟`)) {
+        btn.disabled = false; btn.textContent = 'حفظ الانسحاب';
+        return;
+      }
+    }
+
+    const batch = db.batch();
+
+    // 1) Update subscriber status only (no financial modifications)
+    batch.update(db.collection('subscribers').doc(id), {
       subscriptionState: 'withdrawn',
-      withdrawnAt:       document.getElementById('w_date').value,
-      withdrawalReason:  document.getElementById('w_reason').value.trim(),
-      refundAmount, refundCurrency, refundRate, refundAmountUSD,
-      netAmountUSD:      Math.max(0, s.amountUSD - refundAmountUSD),
+      withdrawnAt:       withdrawDate,
+      withdrawalReason:  withdrawReason,
       updatedBy:         currentUserProfile.uid,
       updatedAt:         firebase.firestore.FieldValue.serverTimestamp(),
     });
+
+    // 2) Create independent refund transaction in refunds collection
+    if (refundAmountUSD > 0) {
+      batch.set(db.collection('refunds').doc(), {
+        subscriberId:   id,
+        subscriberName: s.name || '',
+        refundAmount,
+        refundCurrency,
+        refundAmountUSD,
+        exchangeRate:   refundRate,
+        refundDate:     withdrawDate,
+        refundReason:   withdrawReason,
+        createdBy:      currentUserProfile.uid,
+        createdAt:      firebase.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+
+    // 3) Audit logs
     await writeAuditLog('subscriber_withdrawn', {
       targetType: 'subscriber', targetId: id, targetName: s.name || '',
-      summary:    `تم تسجيل انسحاب: ${s.name || ''} - مسترد $${formatNumber(refundAmountUSD, 2)}`,
-      metadata:   { refundAmount, refundCurrency, refundAmountUSD }
+      summary:    `تم تسجيل انسحاب: ${s.name || ''}`,
     });
+
+    if (refundAmountUSD > 0) {
+      await writeAuditLog('subscriber_refund_created', {
+        targetType: 'subscriber', targetId: id, targetName: s.name || '',
+        summary:    `تم إنشاء استرداد $${formatNumber(refundAmountUSD, 2)} لـ ${s.name || ''}`,
+        metadata:   { refundAmount, refundCurrency, refundAmountUSD, refundDate: withdrawDate },
+      });
+    }
+
     closeWithdrawModal();
     toast('تم تسجيل الانسحاب والاسترداد');
   } catch (error) {
