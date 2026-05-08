@@ -94,6 +94,14 @@ function normalizeSubscriber(s) {
   return normalized;
 }
 
+// ==================== Revenue Helpers (Transaction-Based) ====================
+// Per-subscriber real net: paid minus refunds from collection, with legacy fallback
+function getSubRealNetUSD(s) {
+  const paid = s.paidAmountUSD || s.amountUSD || 0;
+  const refunded = typeof getTotalRefundedUSD === 'function' ? getTotalRefundedUSD(s.id) : (s.refundAmountUSD || 0);
+  return paid - refunded;
+}
+
 // ==================== Calendar ====================
 function renderCalendar() {
   const year  = currentMonth.getFullYear();
@@ -128,7 +136,7 @@ function renderCalendar() {
     const isToday    = dateStr === todayStr;
     const silverCount = dayData.filter(s => s.package === 'فضية').length;
     const goldCount   = dayData.filter(s => s.package === 'ذهبية').length;
-    const dayRevenue  = dayData.reduce((s, x) => s + x.netAmountUSD, 0);
+    const dayRevenue  = dayData.reduce((s, x) => s + getSubRealNetUSD(x), 0);
     if (dayData.length > 0) {
       const revenuePopup = hasPermission('canViewRevenue') ? `<p class="text-emerald-600 font-bold">$${formatNumber(dayRevenue, 2)}</p>` : '';
       html += `<div class="calendar-day has-data${isToday ? ' today' : ''}" onclick="showDayDetails('${dateStr}')">
@@ -163,7 +171,7 @@ function showDayDetails(dateStr) {
   const date    = new Date(dateStr);
   document.getElementById('dayModalTitle').textContent    = date.toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   document.getElementById('dayModalSubtitle').textContent = `${dayData.length} اشتراك في هذا اليوم`;
-  const totalUSD    = dayData.reduce((s, x) => s + x.netAmountUSD, 0);
+  const totalUSD    = dayData.reduce((s, x) => s + getSubRealNetUSD(x), 0);
   const silver      = dayData.filter(s => s.package === 'فضية');
   const gold        = dayData.filter(s => s.package === 'ذهبية');
   const revenueCard = hasPermission('canViewRevenue')
@@ -173,7 +181,7 @@ function showDayDetails(dateStr) {
   dayData.forEach(s => {
     const pkgClass = s.package === 'فضية' ? 'pkg-silver' : 'pkg-gold';
     const empClass = s.convincedBy === 'حنان' ? 'badge-emp-hanan' : s.convincedBy === 'ميار' ? 'badge-emp-mayar' : 'badge-emp-medo';
-    const amountHtml = hasPermission('canViewRevenue') ? `<span class="text-sm font-bold text-emerald-700">$${formatNumber(s.netAmountUSD, 2)}</span>` : '';
+    const amountHtml = hasPermission('canViewRevenue') ? `<span class="text-sm font-bold text-emerald-700">$${formatNumber(getSubRealNetUSD(s), 2)}</span>` : '';
     html += `<div class="border border-slate-200 rounded-lg p-3 flex items-center justify-between flex-wrap gap-2"><div><p class="font-bold text-slate-800">${s.name}</p><p class="text-xs text-slate-500">${getResidenceLabel(s.residence || s.country)} · ${s.dialCode || ''}${s.phone || ''}</p></div><div class="flex items-center gap-2 flex-wrap"><span class="${pkgClass} text-xs px-2 py-1 rounded font-bold">${s.package}</span><span class="text-xs ${empClass} px-2 py-1 rounded font-semibold">${s.convincedBy || '-'}</span>${amountHtml}</div></div>`;
   });
   html += '</div>';
@@ -191,10 +199,11 @@ function updateStats(data) {
   const withdrawn       = data.filter(s => s.subscriptionState === 'withdrawn').length;
   const activeForExpiry = data.filter(s => s.subscriptionState !== 'withdrawn');
   const grossUSD        = data.reduce((sum, s) => sum + (s.paidAmountUSD || s.amountUSD || 0), 0);
-  // Use refunds collection for totals; fallback to legacy subscriber fields
-  const refundUSD       = refundsData.length > 0
-    ? refundsData.reduce((sum, r) => sum + (r.refundAmountUSD || 0), 0)
-    : data.reduce((sum, s) => sum + (s.refundAmountUSD || 0), 0);
+  // Per-subscriber refund: check refunds collection first, then legacy field
+  const refundUSD       = data.reduce((sum, s) => {
+    const fromCollection = refundsData.filter(r => r.subscriberId === s.id).reduce((a, r) => a + (r.refundAmountUSD || 0), 0);
+    return sum + (fromCollection > 0 ? fromCollection : (s.refundAmountUSD || 0));
+  }, 0);
   const netUSD          = grossUSD - refundUSD;
   const expiring        = activeForExpiry.filter(s => s.status === 'ينتهي قريباً').length;
   const silver          = data.filter(s => s.package === 'فضية');
@@ -210,9 +219,9 @@ function updateStats(data) {
     document.getElementById('totalRemainingUSD').textContent = hasPermission('canViewRevenue') ? formatNumber(totalRemaining, 2) : 'مخفي';
   }
   document.getElementById('silverCount').textContent   = formatNumber(silver.length);
-  document.getElementById('silverRevenue').textContent = hasPermission('canViewRevenue') ? formatNumber(silver.reduce((s, x) => s + x.netAmountUSD, 0), 2) : 'مخفي';
+  document.getElementById('silverRevenue').textContent = hasPermission('canViewRevenue') ? formatNumber(silver.reduce((s, x) => s + getSubRealNetUSD(x), 0), 2) : 'مخفي';
   document.getElementById('goldCount').textContent     = formatNumber(gold.length);
-  document.getElementById('goldRevenue').textContent   = hasPermission('canViewRevenue') ? formatNumber(gold.reduce((s, x) => s + x.netAmountUSD, 0), 2) : 'مخفي';
+  document.getElementById('goldRevenue').textContent   = hasPermission('canViewRevenue') ? formatNumber(gold.reduce((s, x) => s + getSubRealNetUSD(x), 0), 2) : 'مخفي';
   document.getElementById('alertsBadge').textContent   = expiring + activeForExpiry.filter(s => s.status === 'منتهي').length;
 }
 
@@ -225,7 +234,7 @@ function updateTeamPerformance(data) {
   const colors = { 'حنان': ['bg-purple-100','text-purple-700','bg-purple-500'], 'ميار': ['bg-teal-100','text-teal-700','bg-teal-500'], 'ميدو': ['bg-orange-100','text-orange-700','bg-orange-500'] };
   const stats = employees.map(emp => {
     const empData = data.filter(s => s.convincedBy === emp);
-    return { name: emp, count: empData.length, revenueUSD: empData.reduce((sum, x) => sum + x.netAmountUSD, 0) };
+    return { name: emp, count: empData.length, revenueUSD: empData.reduce((sum, x) => sum + getSubRealNetUSD(x), 0) };
   }).sort((a, b) => b.revenueUSD - a.revenueUSD);
   const maxRevenue = Math.max(...stats.map(s => s.revenueUSD), 1);
   const totalUSD   = stats.reduce((sum, x) => sum + x.revenueUSD, 0);
@@ -428,7 +437,7 @@ function renderAdvancedStats() {
 
   const canRev    = hasPermission('canViewRevenue');
   const totalSubs = filtered.length;
-  const totalRev  = filtered.reduce((a, s) => a + s.netAmountUSD,       0);
+  const totalRev  = filtered.reduce((a, s) => a + getSubRealNetUSD(s),  0);
   const totalPaid = filtered.reduce((a, s) => a + s.paidAmountUSD,      0);
   const totalRem  = filtered.reduce((a, s) => a + s.remainingAmountUSD, 0);
 
@@ -441,7 +450,7 @@ function renderAdvancedStats() {
   const empColors    = { 'حنان': 'bg-purple-100 text-purple-700', 'ميار': 'bg-teal-100 text-teal-700', 'ميدو': 'bg-orange-100 text-orange-700' };
   const empStats = ['حنان', 'ميار', 'ميدو'].map(e => {
     const d = filtered.filter(s => s.convincedBy === e);
-    return { name: e, count: d.length, rev: d.reduce((a, x) => a + x.netAmountUSD, 0) };
+    return { name: e, count: d.length, rev: d.reduce((a, x) => a + getSubRealNetUSD(x), 0) };
   }).sort((a, b) => b.rev - a.rev);
   const maxRev = Math.max(...empStats.map(e => e.rev), 1);
   document.getElementById('asEmpBreakdown').innerHTML = empStats.map(e => `
